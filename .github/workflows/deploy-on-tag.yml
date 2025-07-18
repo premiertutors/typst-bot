@@ -16,8 +16,9 @@ jobs:
       REPO_URL: https://x-access-token:${{ secrets.GHCR_PAT }}@github.com/premiertutors/typst-bot.git
       SSH_USER: root
       DROPLET_IP: ${{ secrets.DROPLET_IP }}
-      PACKAGE_NAMESPACE: ${{ secrets.PACKAGE_NAMESPACE }}
-      PACKAGE_NAME: ${{ secrets.PACKAGE_NAME }}
+      # hard-code these so we know exactly what we're hitting:
+      PACKAGE_NAMESPACE: premiertutors
+      PACKAGE_NAME: 2_typst
 
     steps:
       - name: Check out code
@@ -28,16 +29,6 @@ jobs:
           echo "🔍 Validating all required variables..."
           
           # Check required secrets are not empty
-          if [ -z "${{ secrets.PACKAGE_NAMESPACE }}" ]; then
-            echo "❌ PACKAGE_NAMESPACE secret is missing or empty"
-            exit 1
-          fi
-          
-          if [ -z "${{ secrets.PACKAGE_NAME }}" ]; then
-            echo "❌ PACKAGE_NAME secret is missing or empty"
-            exit 1
-          fi
-          
           if [ -z "${{ secrets.GHCR_PAT }}" ]; then
             echo "❌ GHCR_PAT secret is missing or empty"
             exit 1
@@ -59,17 +50,17 @@ jobs:
             exit 1
           fi
           
-          # Test package repository accessibility (authenticated)
+          # Test package repo access with PAT (hard-coded URL)
           echo "📦 Testing package repository access with PAT..."
-          REPO="https://x-access-token:${{ secrets.GHCR_PAT }}@github.com/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}.git"
+          REPO="https://x-access-token:${{ secrets.GHCR_PAT }}@github.com/premiertutors/2_typst.git"
+          echo "→ $REPO"
           if ! git ls-remote --exit-code "$REPO" >/dev/null 2>&1; then
-            echo "❌ Cannot access package repository: $REPO"
-            echo "Make sure GHCR_PAT has repo scope and PACKAGE_* secrets are correct"
+            echo "❌ Cannot access package repo via HTTPS+PAT"
             exit 1
           fi
           
           echo "✅ All variables validated successfully!"
-          echo "Package repo: ${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}"
+          echo "Package repo: ${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}"
           echo "Deploy tag: ${{ github.ref_name }}"
 
       - name: Log in to GHCR
@@ -82,7 +73,7 @@ jobs:
       - name: Find latest package tag
         run: |
           echo "🔍 Finding latest package tag..."
-          REPO="https://github.com/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}.git"
+          REPO="https://github.com/${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}.git"
           LATEST=$(git ls-remote --tags "$REPO" \
             | awk -F/ '{print $3}' \
             | grep -E '^v?[0-9]+' \
@@ -99,7 +90,7 @@ jobs:
           echo "LATEST_TAG=$LATEST" >> $GITHUB_ENV
 
       - name: Set package repository URL
-        run: echo "PACKAGE_REPO_URL=https://x-access-token:${{ secrets.GHCR_PAT }}@github.com/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}.git" >> $GITHUB_ENV
+        run: echo "PACKAGE_REPO_URL=https://x-access-token:${{ secrets.GHCR_PAT }}@github.com/${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}.git" >> $GITHUB_ENV
 
       - name: Build & push HTTP-server
         uses: docker/build-push-action@v4
@@ -127,7 +118,7 @@ jobs:
             set -euo pipefail
             cd /opt/typst-bot
 
-            PKG_DIR=cache/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}
+            PKG_DIR=cache/${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}
             LATEST_TAG=${{ env.LATEST_TAG }}
             REPO_URL=${{ env.PACKAGE_REPO_URL }}
 
