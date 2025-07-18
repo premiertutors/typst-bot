@@ -11,9 +11,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      # Hard-coded package coordinates (visible in logs)
       PACKAGE_NAMESPACE: premiertutors
       PACKAGE_NAME: 2_typst
+      # Authenticated URL for your private package (including REPO_PAT)
+      REPO_URL: https://x-access-token:${{ secrets.REPO_PAT }}@github.com/premiertutors/2_typst.git
       # Docker registry settings
       GHCR_USER: premiertutors
       IMAGE_NAME: typst-bot
@@ -37,14 +38,14 @@ jobs:
         id: find_tag
         run: |
           echo "🔍 Finding latest package tag…"
-          REPO_URL_SAFE="https://github.com/${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}.git"
-          LATEST=$(git ls-remote --tags "$REPO_URL_SAFE" \
+          # Use authenticated REPO_URL to list tags for private repo
+          LATEST=$(git ls-remote --tags "${{ env.REPO_URL }}" \
             | awk -F/ '{ tag=$3; sub(/\^\{\}$/,"",tag); print tag }' \
             | grep -E '^[0-9]+' \
             | sort -V \
             | tail -n1)
           if [ -z "$LATEST" ]; then
-            echo "❌ No valid tags found in $REPO_URL_SAFE"
+            echo "❌ No valid tags found"
             exit 1
           fi
           echo "✅ Latest package tag is: $LATEST"
