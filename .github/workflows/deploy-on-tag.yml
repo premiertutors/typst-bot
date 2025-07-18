@@ -73,23 +73,19 @@ jobs:
 
       - name: Find latest package tag
         run: |
-          echo "🔍 Finding latest package tag..."
-          REPO="https://github.com/${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}.git"
+          echo "🔍 Finding latest package tag…"
+          REPO="https://github.com/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}.git"
           LATEST=$(git ls-remote --tags "$REPO" \
-            | awk -F/ '{print $3}' \
-            | grep -E '^v?[0-9]+' \
+            | awk -F/ '{ tag = $3; sub(/\^\{\}$/,"",tag); print tag }' \
             | sort -V \
             | tail -n1)
-          
           if [ -z "$LATEST" ]; then
-            echo "❌ No valid tags found in package repository"
-            echo "Looked for tags matching pattern: ^v?[0-9]+ (e.g. v1.2.3 or 1.2.3)"
+            echo "❌ No valid tags found"
             exit 1
           fi
-          
-          echo "✅ Found latest tag: $LATEST"
+          echo "✅ Latest package tag is: $LATEST"
           echo "LATEST_TAG=$LATEST" >> $GITHUB_ENV
-
+          
       - name: Set package repository URL
         run: echo "PACKAGE_REPO_URL=https://x-access-token:${{ secrets.GHCR_PAT }}@github.com/${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}.git" >> $GITHUB_ENV
 
