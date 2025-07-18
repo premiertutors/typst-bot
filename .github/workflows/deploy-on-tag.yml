@@ -45,23 +45,23 @@ jobs:
 
       - name: Deploy to droplet
         run: |
-          ssh -o StrictHostKeyChecking=no \
-              ${{ env.SSH_USER }}@${{ env.DROPLET_IP }} <<EOF
+            ssh -o StrictHostKeyChecking=no \
+                $SSH_USER@${{ secrets.DROPLET_IP }} <<EOF
             set -e
             cd /opt/typst-bot
 
-            # sync your private package to the same tag
-            PKG_DIR=cache/${{ env.PACKAGE_NAMESPACE }}}}/${{ env.PACKAGE_NAME }}
+            # ✅ GOOD: exactly two braces after namespace
+            PKG_DIR=cache/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}
+
             if [ -d "\$PKG_DIR" ]; then
-              cd "\$PKG_DIR"
-              git fetch origin --tags
-              git checkout ${{ env.IMAGE_TAG }}
+                cd "\$PKG_DIR"
+                git fetch origin --tags
+                git checkout ${{ github.ref_name }}
             else
-              git clone --branch ${{ env.IMAGE_TAG }} \
-                ${{ env.PACKAGE_REPO_URL }} "\$PKG_DIR"
+                git clone --branch ${{ github.ref_name }} \
+                ${{ secrets.PACKAGE_REPO_URL }} "\$PKG_DIR"
             fi
 
-            # pull & restart your container
             docker-compose -f docker-compose.http.yml pull
             docker-compose -f docker-compose.http.yml up -d --remove-orphans
-          EOF
+            EOF
