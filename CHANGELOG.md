@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.2.2] - 2025-07-18
+
+### Fixed
+- **Auto-detect package repository tags**: Fixed deployment workflow to automatically find the latest tag from the package repository instead of using the bot's tag
+- **Parameterized repository references**: Made workflow more maintainable by using `PACKAGE_NAMESPACE` and `PACKAGE_NAME` secrets consistently
+- **Resolved deployment failures**: Fixed "Remote branch not found" error that occurred when bot and package repositories had different tag versions
+- **Improved variable interpolation**: Fixed heredoc syntax to properly pass environment variables through SSH
+
 ## [v1.2.0] - 2025-07-18
 
 ### Added

@@ -10,7 +10,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      GHCR_USER: premiertutors
+      GHCR_USER: ${{ secrets.PACKAGE_NAMESPACE }}
       IMAGE_NAME: typst-bot
       IMAGE_TAG: ${{ github.ref_name }}          # the tag you just pushed
       REPO_URL: https://x-access-token:${{ secrets.GHCR_PAT }}@github.com/premiertutors/typst-bot.git
@@ -38,6 +38,17 @@ jobs:
           push: true
           tags: ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:http-server-${{ env.IMAGE_TAG }}
 
+      - name: Find latest package tag
+        id: pkg
+        run: |
+          LATEST=$(git ls-remote --tags https://github.com/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}.git \
+            | awk -F/ '{print $3}' \
+            | grep '^v[0-9]\+' \
+            | sort -V \
+            | tail -n1)
+          echo "LATEST_TAG=$LATEST" >> $GITHUB_OUTPUT
+          echo "LATEST_TAG=$LATEST" >> $GITHUB_ENV
+
       - name: Start SSH agent
         uses: webfactory/ssh-agent@v0.5.4
         with:
@@ -58,10 +69,10 @@ jobs:
 
             PKG_DIR=cache/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}
             if [ -d "$PKG_DIR" ]; then
-              cd "$PKG_DIR" && git fetch --tags && git checkout ${{ github.ref_name }}
+              cd "$PKG_DIR" && git fetch --tags && git checkout $LATEST_TAG
             else
-              git clone --branch ${{ github.ref_name }} \
-                "https://x-access-token:${{ secrets.GHCR_PAT }}@github.com/premiertutors/2_typst.git" \
+              git clone --branch $LATEST_TAG \
+                "https://x-access-token:${{ secrets.GHCR_PAT }}@github.com/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}.git" \
                 "$PKG_DIR"
             fi
 
