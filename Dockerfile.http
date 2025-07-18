@@ -1,7 +1,7 @@
 FROM rust:latest as builder
 WORKDIR /usr/src/app
 COPY . .
-RUN cargo build --release --bin http-server
+RUN cargo build --release --package http-server
 
 FROM debian:bullseye-slim
 COPY --from=builder /usr/src/app/target/release/http-server /usr/local/bin/
