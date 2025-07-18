@@ -45,8 +45,7 @@ jobs:
 
       - name: Deploy to droplet
         run: |
-            ssh -o StrictHostKeyChecking=no \
-                $SSH_USER@${{ secrets.DROPLET_IP }} <<EOF
+            ssh -A -o StrictHostKeyChecking=no root@${{ secrets.DROPLET_IP }} <<EOF
             set -e
             cd /opt/typst-bot
 
