@@ -1,4 +1,3 @@
-```yaml
 name: Deploy on Tag
 
 # Runs whenever you push a Git tag (e.g. v1.2.3 or 1.2.3)
