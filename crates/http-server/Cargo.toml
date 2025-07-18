@@ -1,0 +1,15 @@
+[package]
+edition = "2021"
+name = "http-server"
+version = "0.1.0"
+
+[[bin]]
+name = "http-server"
+path = "src/main.rs"
+
+[dependencies]
+actix-web = "4"
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+worker-lib = { path = "../worker-lib" }

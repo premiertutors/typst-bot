@@ -2,13 +2,7 @@ use std::io::Write as _;
 use std::panic::AssertUnwindSafe;
 
 use protocol::{Request, Response};
-
-use crate::render::render;
-use crate::sandbox::Sandbox;
-
-mod diagnostic;
-mod render;
-mod sandbox;
+use worker_lib::{render, Sandbox};
 
 fn panic_to_string(panic: &dyn std::any::Any) -> String {
 	let inner = panic

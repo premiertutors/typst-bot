@@ -1,5 +1,11 @@
 [workspace]
-members = ["crates/bot", "crates/protocol", "crates/worker"]
+members = [
+  "crates/bot", 
+  "crates/protocol", 
+  "crates/worker",
+  "crates/worker-lib",
+  "crates/http-server"
+]
 default-members = ["crates/bot"]
 resolver = "2"
 
