@@ -1,10 +1,12 @@
 version: "3.8"
 services:
   typst-http:
-    build:
-      context: .
-      dockerfile: Dockerfile.http
+    image: yourdockerhubuser/typst-bot:http-server-v0.1.0
     ports:
       - "8080:8080"
     environment:
       - CACHE_DIRECTORY=/tmp/typst-cache
+    volumes:
+      - ./cache:/tmp/typst-cache
+    env_file:
+      - .env
