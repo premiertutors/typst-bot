@@ -1,6 +1,6 @@
 name: Deploy on Tag
 
-# runs whenever you push a Git tag (e.g. v1.2.3 or 1.2.3)
+# Runs whenever you push a Git tag (e.g. v1.2.3 or 1.2.3)
 on:
   push:
     tags:
@@ -11,58 +11,32 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      GHCR_USER: ${{ secrets.PACKAGE_NAMESPACE }}
-      IMAGE_NAME: typst-bot
-      IMAGE_TAG: ${{ github.ref_name }}          # the tag you just pushed
-      REPO_URL: https://x-access-token:${{ secrets.GHCR_PAT }}@github.com/premiertutors/typst-bot.git
-      SSH_USER: root
-      DROPLET_IP: ${{ secrets.DROPLET_IP }}
-      # hard-code these so we know exactly what we're hitting:
+      # Hard‑coded package coords (will not be masked)
       PACKAGE_NAMESPACE: premiertutors
       PACKAGE_NAME: 2_typst
+      # Authenticated URL for your private package
+      REPO_URL: https://x-access-token:${{ secrets.REPO_PAT }}@github.com/premiertutors/2_typst.git
+      # Safe repo URL for logging
+      REPO_SAFE: https://github.com/premiertutors/2_typst.git
+      GHCR_USER: premiertutors
+      IMAGE_NAME: typst-bot
+      IMAGE_TAG: ${{ github.ref_name }}
+      SSH_USER: root
+      DROPLET_IP: ${{ secrets.DROPLET_IP }}
 
     steps:
       - name: Check out code
         uses: actions/checkout@v3
 
-      - name: Validate required secrets and variables
+      - name: Validate package repo access
         run: |
-          echo "🔍 Validating all required variables..."
-          
-          # Check required secrets are not empty
-          if [ -z "${{ secrets.GHCR_PAT }}" ]; then
-            echo "❌ GHCR_PAT secret is missing or empty"
+          echo "🔍 Testing package repository access…"
+          echo "→ $REPO_SAFE"
+          if ! git ls-remote --exit-code "$REPO_URL" >/dev/null 2>&1; then
+            echo "❌ Cannot access package via HTTPS+PAT"
             exit 1
           fi
-          
-          if [ -z "${{ secrets.DROPLET_IP }}" ]; then
-            echo "❌ DROPLET_IP secret is missing or empty"
-            exit 1
-          fi
-          
-          if [ -z "${{ secrets.SSH_DEPLOY_KEY }}" ]; then
-            echo "❌ SSH_DEPLOY_KEY secret is missing or empty"
-            exit 1
-          fi
-          
-          # Validate tag format
-          if [[ ! "${{ github.ref_name }}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "❌ Tag '${{ github.ref_name }}' must be like 1.2.3 or v1.2.3"
-            exit 1
-          fi
-          
-          # Test package repo access with PAT (hard-coded URL)
-          echo "📦 Testing package repository access with PAT..."
-          REPO="https://x-access-token:${{ secrets.GHCR_PAT }}@github.com/premiertutors/2_typst.git"
-          echo "→ $REPO"
-          if ! git ls-remote --exit-code "$REPO" >/dev/null 2>&1; then
-            echo "❌ Cannot access package repo via HTTPS+PAT"
-            exit 1
-          fi
-          
-          echo "✅ All variables validated successfully!"
-          echo "Package repo: ${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}"
-          echo "Deploy tag: ${{ github.ref_name }}"
+          echo "✅ Package repo is reachable"
 
       - name: Log in to GHCR
         uses: docker/login-action@v2
@@ -74,9 +48,10 @@ jobs:
       - name: Find latest package tag
         run: |
           echo "🔍 Finding latest package tag…"
-          REPO="https://github.com/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}.git"
+          REPO="https://github.com/${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}.git"
           LATEST=$(git ls-remote --tags "$REPO" \
-            | awk -F/ '{ tag = $3; sub(/\^\{\}$/,"",tag); print tag }' \
+            | awk -F/ '{ tag=$3; sub(/\^\{\}$/,"",tag); print tag }' \
+            | grep -E '^[0-9]+' \
             | sort -V \
             | tail -n1)
           if [ -z "$LATEST" ]; then
@@ -85,9 +60,6 @@ jobs:
           fi
           echo "✅ Latest package tag is: $LATEST"
           echo "LATEST_TAG=$LATEST" >> $GITHUB_ENV
-          
-      - name: Set package repository URL
-        run: echo "PACKAGE_REPO_URL=https://x-access-token:${{ secrets.GHCR_PAT }}@github.com/${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}.git" >> $GITHUB_ENV
 
       - name: Build & push HTTP-server
         uses: docker/build-push-action@v4
@@ -104,27 +76,27 @@ jobs:
 
       - name: Verify droplet SSH & dependencies
         run: |
-          # quick check that SSH works
-          ssh -o StrictHostKeyChecking=no $SSH_USER@${{ secrets.DROPLET_IP }} \
+          ssh -o StrictHostKeyChecking=no \
+            ${SSH_USER}@${{ secrets.DROPLET_IP }} \
             "echo SSH OK; docker --version; docker-compose --version; git --version"
 
       - name: Deploy to droplet
         run: |
           ssh -o StrictHostKeyChecking=no \
-              $SSH_USER@${{ secrets.DROPLET_IP }} <<EOF
+            ${SSH_USER}@${{ secrets.DROPLET_IP }} <<EOF
             set -euo pipefail
             cd /opt/typst-bot
 
             PKG_DIR=cache/${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}
             LATEST_TAG=${{ env.LATEST_TAG }}
-            REPO_URL=${{ env.PACKAGE_REPO_URL }}
+            REPO_URL=${{ env.REPO_URL }}
 
-            if [ -d "\$PKG_DIR" ]; then
-              cd "\$PKG_DIR"
+            if [ -d "$PKG_DIR" ]; then
+              cd "$PKG_DIR"
               git fetch --tags
-              git checkout "\$LATEST_TAG"
+              git checkout "$LATEST_TAG"
             else
-              git clone --branch "\$LATEST_TAG" "\$REPO_URL" "\$PKG_DIR"
+              git clone --branch "$LATEST_TAG" "$REPO_URL" "$PKG_DIR"
             fi
 
             docker-compose -f docker-compose.http.yml pull
