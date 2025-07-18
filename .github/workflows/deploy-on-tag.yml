@@ -1,10 +1,11 @@
 name: Deploy on Tag
 
-# runs whenever you push a Git tag (e.g. v1.2.3)
+# runs whenever you push a Git tag (e.g. v1.2.3 or 1.2.3)
 on:
   push:
     tags:
       - 'v*.*.*'
+      - '*.*.*'
 
 jobs:
   deploy:
@@ -45,8 +46,8 @@ jobs:
           fi
           
           # Validate tag format
-          if [[ ! "${{ github.ref_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "❌ Tag '${{ github.ref_name }}' doesn't match expected format v*.*.* (e.g. v1.2.3)"
+          if [[ ! "${{ github.ref_name }}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Tag '${{ github.ref_name }}' must be like 1.2.3 or v1.2.3"
             exit 1
           fi
           
