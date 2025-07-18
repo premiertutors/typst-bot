@@ -3,7 +3,13 @@ WORKDIR /usr/src/app
 COPY . .
 RUN cargo build --release --package http-server
 
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim 
+
+# (optional) install CA certs so HTTPS works if you ever need it
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /usr/src/app/target/release/http-server /usr/local/bin/
 EXPOSE 8080
 CMD ["http-server"]

@@ -10,7 +10,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      GHCR_USER: premriertutors
+      GHCR_USER: premiertutors
       IMAGE_NAME: typst-bot
       IMAGE_TAG: ${{ github.ref_name }}          # the tag you just pushed
       DROPLET_IP: ${{ secrets.DROPLET_IP }}
