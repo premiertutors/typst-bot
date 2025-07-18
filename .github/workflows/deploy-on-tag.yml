@@ -1,0 +1,67 @@
+name: Deploy on Tag
+
+# runs whenever you push a Git tag (e.g. v1.2.3)
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      GHCR_USER: premriertutors
+      IMAGE_NAME: typst-bot
+      IMAGE_TAG: ${{ github.ref_name }}          # the tag you just pushed
+      DROPLET_IP: ${{ secrets.DROPLET_IP }}
+      SSH_USER: root                            # override with a secret if needed
+      PACKAGE_NAMESPACE: ${{ secrets.PACKAGE_NAMESPACE }}
+      PACKAGE_NAME: ${{ secrets.PACKAGE_NAME }}
+      PACKAGE_REPO_URL: ${{ secrets.PACKAGE_REPO_URL }}
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT }}
+
+      - name: Build & push HTTP-server
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: Dockerfile.http
+          push: true
+          tags: ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:http-server-${{ env.IMAGE_TAG }}
+
+      - name: Start SSH agent
+        uses: webfactory/ssh-agent@v0.5.4
+        with:
+          ssh-private-key: ${{ secrets.SSH_DEPLOY_KEY }}
+
+      - name: Deploy to droplet
+        run: |
+          ssh -o StrictHostKeyChecking=no \
+              ${{ env.SSH_USER }}@${{ env.DROPLET_IP }} <<EOF
+            set -e
+            cd /opt/typst-bot
+
+            # sync your private package to the same tag
+            PKG_DIR=cache/${{ env.PACKAGE_NAMESPACE }}}}/${{ env.PACKAGE_NAME }}
+            if [ -d "\$PKG_DIR" ]; then
+              cd "\$PKG_DIR"
+              git fetch origin --tags
+              git checkout ${{ env.IMAGE_TAG }}
+            else
+              git clone --branch ${{ env.IMAGE_TAG }} \
+                ${{ env.PACKAGE_REPO_URL }} "\$PKG_DIR"
+            fi
+
+            # pull & restart your container
+            docker-compose -f docker-compose.http.yml pull
+            docker-compose -f docker-compose.http.yml up -d --remove-orphans
+          EOF
