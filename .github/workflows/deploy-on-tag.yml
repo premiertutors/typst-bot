@@ -94,4 +94,3 @@ jobs:
             docker-compose -f docker-compose.http.yml pull
             docker-compose -f docker-compose.http.yml up -d --remove-orphans
           EOF
-```
