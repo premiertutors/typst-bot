@@ -19,7 +19,7 @@ pub struct TooBig {
 	axis: Axis,
 }
 
-fn determine_pixels_per_point(size: Size) -> Result<f32, TooBig> {
+fn determine_pixels_per_point(size: Size, desired_resolution: f32) -> Result<f32, TooBig> {
 	// We want to truncate.
 	#![allow(clippy::cast_possible_truncation)]
 
@@ -38,7 +38,7 @@ fn determine_pixels_per_point(size: Size) -> Result<f32, TooBig> {
 		})
 	} else {
 		let area = x * y;
-		let nominal = DESIRED_RESOLUTION / area.sqrt();
+		let nominal = desired_resolution / area.sqrt();
 		Ok(nominal.min(MAX_PIXELS_PER_POINT))
 	}
 }
@@ -51,6 +51,10 @@ const PAGE_LIMIT: usize = 5;
 const BYTES_LIMIT: usize = 25 * 1024 * 1024;
 
 pub fn render(sandbox: &Sandbox, source: String) -> Result<Rendered, String> {
+	render_with_resolution(sandbox, source, DESIRED_RESOLUTION)
+}
+
+pub fn render_with_resolution(sandbox: &Sandbox, source: String, resolution: f32) -> Result<Rendered, String> {
 	let world = sandbox.with_source(source);
 
 	let document = typst::compile::<PagedDocument>(&world);
@@ -66,7 +70,7 @@ pub fn render(sandbox: &Sandbox, source: String) -> Result<Rendered, String> {
 		.iter()
 		.take(PAGE_LIMIT)
 		.map(|page| {
-			let pixels_per_point = determine_pixels_per_point(page.frame.size()).map_err(to_string)?;
+			let pixels_per_point = determine_pixels_per_point(page.frame.size(), resolution).map_err(to_string)?;
 			let pixmap = typst_render::render(page, pixels_per_point);
 
 			let mut writer = Cursor::new(Vec::new());

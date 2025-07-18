@@ -1257,6 +1257,7 @@ dependencies = [
  "actix-web",
  "base64 0.22.1",
  "serde",
+ "thiserror 1.0.69",
  "tokio",
  "worker-lib",
 ]
