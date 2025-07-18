@@ -23,12 +23,83 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
 
+      - name: Validate required secrets and variables
+        run: |
+          echo "🔍 Validating all required variables..."
+          
+          # Check required secrets are not empty
+          if [ -z "${{ secrets.PACKAGE_NAMESPACE }}" ]; then
+            echo "❌ PACKAGE_NAMESPACE secret is missing or empty"
+            exit 1
+          fi
+          
+          if [ -z "${{ secrets.PACKAGE_NAME }}" ]; then
+            echo "❌ PACKAGE_NAME secret is missing or empty"
+            exit 1
+          fi
+          
+          if [ -z "${{ secrets.GHCR_PAT }}" ]; then
+            echo "❌ GHCR_PAT secret is missing or empty"
+            exit 1
+          fi
+          
+          if [ -z "${{ secrets.DROPLET_IP }}" ]; then
+            echo "❌ DROPLET_IP secret is missing or empty"
+            exit 1
+          fi
+          
+          if [ -z "${{ secrets.SSH_DEPLOY_KEY }}" ]; then
+            echo "❌ SSH_DEPLOY_KEY secret is missing or empty"
+            exit 1
+          fi
+          
+          # Validate tag format
+          if [[ ! "${{ github.ref_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Tag '${{ github.ref_name }}' doesn't match expected format v*.*.* (e.g. v1.2.3)"
+            exit 1
+          fi
+          
+          # Test package repository accessibility
+          echo "📦 Testing package repository access..."
+          REPO="https://github.com/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}.git"
+          if ! git ls-remote --exit-code "$REPO" >/dev/null 2>&1; then
+            echo "❌ Cannot access package repository: $REPO"
+            echo "Check PACKAGE_NAMESPACE and PACKAGE_NAME secrets"
+            exit 1
+          fi
+          
+          echo "✅ All variables validated successfully!"
+          echo "Package repo: ${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}"
+          echo "Deploy tag: ${{ github.ref_name }}"
+
       - name: Log in to GHCR
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_PAT }}
+
+      - name: Find latest package tag
+        run: |
+          echo "🔍 Finding latest package tag..."
+          REPO="https://github.com/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}.git"
+          LATEST=$(git ls-remote --tags "$REPO" \
+            | awk -F/ '{print $3}' \
+            | grep -E '^v?[0-9]+' \
+            | sort -V \
+            | tail -n1)
+          
+          if [ -z "$LATEST" ]; then
+            echo "❌ No valid tags found in package repository"
+            echo "Looked for tags matching pattern: ^v?[0-9]+ (e.g. v1.2.3 or 1.2.3)"
+            exit 1
+          fi
+          
+          echo "✅ Found latest tag: $LATEST"
+          echo "LATEST_TAG=$LATEST" >> $GITHUB_ENV
+
+      - name: Set package repository URL
+        run: echo "PACKAGE_REPO_URL=https://x-access-token:${{ secrets.GHCR_PAT }}@github.com/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}.git" >> $GITHUB_ENV
 
       - name: Build & push HTTP-server
         uses: docker/build-push-action@v4
@@ -37,19 +108,6 @@ jobs:
           file: Dockerfile.http
           push: true
           tags: ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:http-server-${{ env.IMAGE_TAG }}
-
-      - name: Find latest package tag
-        id: pkg
-        run: |
-          LATEST=$(git ls-remote --tags https://github.com/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}.git \
-            | awk -F/ '{print $3}' \
-            | grep '^v[0-9]\+' \
-            | sort -V \
-            | tail -n1)
-          echo "LATEST_TAG=$LATEST" >> $GITHUB_ENV
-
-      - name: Set package repository URL
-        run: echo "PACKAGE_REPO_URL=https://x-access-token:${{ secrets.GHCR_PAT }}@github.com/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}.git" >> $GITHUB_ENV
 
       - name: Start SSH agent
         uses: webfactory/ssh-agent@v0.5.4
@@ -65,20 +123,20 @@ jobs:
       - name: Deploy to droplet
         run: |
           ssh -o StrictHostKeyChecking=no \
-              $SSH_USER@${{ secrets.DROPLET_IP }} << 'EOF'
+              $SSH_USER@${{ secrets.DROPLET_IP }} <<EOF
             set -euo pipefail
             cd /opt/typst-bot
 
             PKG_DIR=cache/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}
-            LATEST_TAG="${{ env.LATEST_TAG }}"
-            REPO_URL="${{ env.PACKAGE_REPO_URL }}"
+            LATEST_TAG=${{ env.LATEST_TAG }}
+            REPO_URL=${{ env.PACKAGE_REPO_URL }}
 
-            if [ -d "$PKG_DIR" ]; then
-              cd "$PKG_DIR"
+            if [ -d "\$PKG_DIR" ]; then
+              cd "\$PKG_DIR"
               git fetch --tags
-              git checkout "$LATEST_TAG"
+              git checkout "\$LATEST_TAG"
             else
-              git clone --branch "$LATEST_TAG" "$REPO_URL" "$PKG_DIR"
+              git clone --branch "\$LATEST_TAG" "\$REPO_URL" "\$PKG_DIR"
             fi
 
             docker-compose -f docker-compose.http.yml pull
