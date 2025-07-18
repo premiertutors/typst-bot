@@ -46,8 +46,10 @@ jobs:
             | grep '^v[0-9]\+' \
             | sort -V \
             | tail -n1)
-          echo "LATEST_TAG=$LATEST" >> $GITHUB_OUTPUT
           echo "LATEST_TAG=$LATEST" >> $GITHUB_ENV
+
+      - name: Set package repository URL
+        run: echo "PACKAGE_REPO_URL=https://x-access-token:${{ secrets.GHCR_PAT }}@github.com/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}.git" >> $GITHUB_ENV
 
       - name: Start SSH agent
         uses: webfactory/ssh-agent@v0.5.4
@@ -63,17 +65,20 @@ jobs:
       - name: Deploy to droplet
         run: |
           ssh -o StrictHostKeyChecking=no \
-              $SSH_USER@${{ secrets.DROPLET_IP }} <<'EOF'
-            set -e
+              $SSH_USER@${{ secrets.DROPLET_IP }} << 'EOF'
+            set -euo pipefail
             cd /opt/typst-bot
 
             PKG_DIR=cache/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}
+            LATEST_TAG="${{ env.LATEST_TAG }}"
+            REPO_URL="${{ env.PACKAGE_REPO_URL }}"
+
             if [ -d "$PKG_DIR" ]; then
-              cd "$PKG_DIR" && git fetch --tags && git checkout $LATEST_TAG
+              cd "$PKG_DIR"
+              git fetch --tags
+              git checkout "$LATEST_TAG"
             else
-              git clone --branch $LATEST_TAG \
-                "https://x-access-token:${{ secrets.GHCR_PAT }}@github.com/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}.git" \
-                "$PKG_DIR"
+              git clone --branch "$LATEST_TAG" "$REPO_URL" "$PKG_DIR"
             fi
 
             docker-compose -f docker-compose.http.yml pull
