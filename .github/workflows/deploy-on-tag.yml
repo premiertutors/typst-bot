@@ -59,12 +59,12 @@ jobs:
             exit 1
           fi
           
-          # Test package repository accessibility
-          echo "📦 Testing package repository access..."
-          REPO="https://github.com/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}.git"
+          # Test package repository accessibility (authenticated)
+          echo "📦 Testing package repository access with PAT..."
+          REPO="https://x-access-token:${{ secrets.GHCR_PAT }}@github.com/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}.git"
           if ! git ls-remote --exit-code "$REPO" >/dev/null 2>&1; then
             echo "❌ Cannot access package repository: $REPO"
-            echo "Check PACKAGE_NAMESPACE and PACKAGE_NAME secrets"
+            echo "Make sure GHCR_PAT has repo scope and PACKAGE_* secrets are correct"
             exit 1
           fi
           
