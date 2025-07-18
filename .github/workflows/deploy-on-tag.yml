@@ -11,32 +11,20 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      # Hard‑coded package coords (will not be masked)
+      # Hard-coded package coordinates (visible in logs)
       PACKAGE_NAMESPACE: premiertutors
       PACKAGE_NAME: 2_typst
-      # Authenticated URL for your private package
-      REPO_URL: https://x-access-token:${{ secrets.REPO_PAT }}@github.com/premiertutors/2_typst.git
-      # Safe repo URL for logging
-      REPO_SAFE: https://github.com/premiertutors/2_typst.git
+      # Docker registry settings
       GHCR_USER: premiertutors
       IMAGE_NAME: typst-bot
       IMAGE_TAG: ${{ github.ref_name }}
+      # SSH settings for deploy
       SSH_USER: root
       DROPLET_IP: ${{ secrets.DROPLET_IP }}
 
     steps:
       - name: Check out code
         uses: actions/checkout@v3
-
-      - name: Validate package repo access
-        run: |
-          echo "🔍 Testing package repository access…"
-          echo "→ $REPO_SAFE"
-          if ! git ls-remote --exit-code "$REPO_URL" >/dev/null 2>&1; then
-            echo "❌ Cannot access package via HTTPS+PAT"
-            exit 1
-          fi
-          echo "✅ Package repo is reachable"
 
       - name: Log in to GHCR
         uses: docker/login-action@v2
@@ -46,16 +34,17 @@ jobs:
           password: ${{ secrets.GHCR_PAT }}
 
       - name: Find latest package tag
+        id: find_tag
         run: |
           echo "🔍 Finding latest package tag…"
-          REPO="https://github.com/${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}.git"
-          LATEST=$(git ls-remote --tags "$REPO" \
+          REPO_URL_SAFE="https://github.com/${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}.git"
+          LATEST=$(git ls-remote --tags "$REPO_URL_SAFE" \
             | awk -F/ '{ tag=$3; sub(/\^\{\}$/,"",tag); print tag }' \
             | grep -E '^[0-9]+' \
             | sort -V \
             | tail -n1)
           if [ -z "$LATEST" ]; then
-            echo "❌ No valid tags found"
+            echo "❌ No valid tags found in $REPO_URL_SAFE"
             exit 1
           fi
           echo "✅ Latest package tag is: $LATEST"
@@ -80,7 +69,7 @@ jobs:
             ${SSH_USER}@${{ secrets.DROPLET_IP }} \
             "echo SSH OK; docker --version; docker-compose --version; git --version"
 
-      - name: Deploy to droplet
+      - name: Deploy via GitHub API tarball
         run: |
           ssh -o StrictHostKeyChecking=no \
             ${SSH_USER}@${{ secrets.DROPLET_IP }} <<EOF
@@ -88,16 +77,14 @@ jobs:
             cd /opt/typst-bot
 
             PKG_DIR=cache/${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}
-            LATEST_TAG=${{ env.LATEST_TAG }}
-            REPO_URL=${{ env.REPO_URL }}
+            rm -rf "\$PKG_DIR"
+            mkdir -p "\$PKG_DIR"
 
-            if [ -d "$PKG_DIR" ]; then
-              cd "$PKG_DIR"
-              git fetch --tags
-              git checkout "$LATEST_TAG"
-            else
-              git clone --branch "$LATEST_TAG" "$REPO_URL" "$PKG_DIR"
-            fi
+            echo "📦 Downloading tarball for $LATEST_TAG"
+            curl -sSfL \
+              -H "Authorization: token ${{ secrets.REPO_PAT }}" \
+              https://api.github.com/repos/${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}/tarball/$LATEST_TAG \
+            | tar xz --strip-components=1 -C "\$PKG_DIR"
 
             docker-compose -f docker-compose.http.yml pull
             docker-compose -f docker-compose.http.yml up -d --remove-orphans
