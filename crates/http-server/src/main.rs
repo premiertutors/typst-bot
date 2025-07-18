@@ -2,7 +2,7 @@ use actix_web::{post, web, App, HttpResponse, HttpServer};
 use base64::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-use worker_lib::{render_with_resolution, Sandbox};
+use worker_lib::{render_with_format, OutputFormat, Sandbox};
 
 #[derive(Debug, thiserror::Error)]
 #[error("Invalid theme")]
@@ -126,14 +126,17 @@ struct Req {
     #[serde(default)]
     page_size: Option<PageSize>,
     #[serde(default)]
-    resolution: Option<f32>,
+    format: Option<String>, // "png" or "pdf", defaults to "png"
+    #[serde(default)]
+    resolution: Option<f32>, // Only used for PNG format
 }
 
 #[derive(Serialize)]
 struct Resp {
-    images: Vec<String>,
+    data: Vec<String>, // base64 encoded data (images for PNG, single PDF for PDF)
     more_pages: usize,
     warnings: String,
+    format: String, // "png" or "pdf" 
 }
 
 #[post("/render")]
@@ -147,13 +150,32 @@ async fn do_render(body: web::Json<Req>, data: web::Data<Sandbox>) -> HttpRespon
     };
     source.insert_str(0, &preamble.preamble());
     
-    let resolution = body.resolution.unwrap_or(1000.0);
-    let out = web::block(move || render_with_resolution(&data, source, resolution)).await;
+    // Parse format parameter (default to PNG)
+    let output_format = match body.format.as_deref().unwrap_or("png") {
+        "pdf" => OutputFormat::Pdf,
+        _ => OutputFormat::Png, // Default to PNG for any invalid/missing format
+    };
+    
+    // For PNG: use resolution parameter (default handled in render function)
+    // For PDF: resolution is ignored since PDFs are vector-based
+    let resolution = if matches!(output_format, OutputFormat::Png) {
+        body.resolution
+    } else {
+        None // PDF doesn't use resolution
+    };
+    
+    let format_str = match output_format {
+        OutputFormat::Png => "png",
+        OutputFormat::Pdf => "pdf",
+    };
+    
+    let out = web::block(move || render_with_format(&data, source, output_format, resolution)).await;
     match out {
         Ok(Ok(o)) => HttpResponse::Ok().json(Resp {
-            images: o.images.into_iter().map(|img| BASE64_STANDARD.encode(img)).collect(),
+            data: o.images.into_iter().map(|data| BASE64_STANDARD.encode(data)).collect(),
             more_pages: o.more_pages,
             warnings: o.warnings,
+            format: format_str.to_string(),
         }),
         Ok(Err(e)) => HttpResponse::BadRequest().body(e),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),

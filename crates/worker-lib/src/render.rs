@@ -10,6 +10,18 @@ const DESIRED_RESOLUTION: f32 = 1000.0;
 const MAX_SIZE: f32 = 10000.0;
 const MAX_PIXELS_PER_POINT: f32 = 5.0;
 
+#[derive(Debug, Clone, Copy)]
+pub enum OutputFormat {
+	Png,
+	Pdf,
+}
+
+impl Default for OutputFormat {
+	fn default() -> Self {
+		Self::Png
+	}
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error(
 	"rendered output was too big: the {axis:?} axis was {size} pt but the maximum is {MAX_SIZE}"
@@ -55,6 +67,10 @@ pub fn render(sandbox: &Sandbox, source: String) -> Result<Rendered, String> {
 }
 
 pub fn render_with_resolution(sandbox: &Sandbox, source: String, resolution: f32) -> Result<Rendered, String> {
+	render_with_format(sandbox, source, OutputFormat::Png, Some(resolution))
+}
+
+pub fn render_with_format(sandbox: &Sandbox, source: String, format: OutputFormat, resolution: Option<f32>) -> Result<Rendered, String> {
 	let world = sandbox.with_source(source);
 
 	let document = typst::compile::<PagedDocument>(&world);
@@ -65,43 +81,57 @@ pub fn render_with_resolution(sandbox: &Sandbox, source: String, resolution: f32
 
 	let mut total_attachment_size = 0;
 
-	let images = document
-		.pages
-		.iter()
-		.take(PAGE_LIMIT)
-		.map(|page| {
-			let pixels_per_point = determine_pixels_per_point(page.frame.size(), resolution).map_err(to_string)?;
-			let pixmap = typst_render::render(page, pixels_per_point);
+	let output_data = match format {
+		OutputFormat::Png => {
+			// For PNG, use resolution parameter (default to DESIRED_RESOLUTION if not provided)
+			let res = resolution.unwrap_or(DESIRED_RESOLUTION);
+			
+			document
+				.pages
+				.iter()
+				.take(PAGE_LIMIT)
+				.map(|page| {
+					let pixels_per_point = determine_pixels_per_point(page.frame.size(), res).map_err(to_string)?;
+					let pixmap = typst_render::render(page, pixels_per_point);
 
-			let mut writer = Cursor::new(Vec::new());
+					let mut writer = Cursor::new(Vec::new());
 
-			// The unwrap will never fail since `Vec`'s `Write` implementation is infallible.
-			image::write_buffer_with_format(
-				&mut writer,
-				bytemuck::cast_slice(pixmap.pixels()),
-				pixmap.width(),
-				pixmap.height(),
-				image::ColorType::Rgba8,
-				image::ImageFormat::Png,
-			)
-			.unwrap();
+					// The unwrap will never fail since `Vec`'s `Write` implementation is infallible.
+					image::write_buffer_with_format(
+						&mut writer,
+						bytemuck::cast_slice(pixmap.pixels()),
+						pixmap.width(),
+						pixmap.height(),
+						image::ColorType::Rgba8,
+						image::ImageFormat::Png,
+					)
+					.unwrap();
 
-			Ok(writer.into_inner())
-		})
-		.take_while(|image| {
-			if let Ok(image) = image {
-				total_attachment_size += image.len();
-				total_attachment_size <= BYTES_LIMIT
-			} else {
-				true
-			}
-		})
-		.collect::<Result<Vec<_>, String>>()?;
+					Ok(writer.into_inner())
+				})
+				.take_while(|image| {
+					if let Ok(image) = image {
+						total_attachment_size += image.len();
+						total_attachment_size <= BYTES_LIMIT
+					} else {
+						true
+					}
+				})
+				.collect::<Result<Vec<_>, String>>()?
+		}
+		OutputFormat::Pdf => {
+			// For PDF, resolution is ignored since it's vector-based
+			// Generate a single PDF containing all pages
+			let pdf_options = typst_pdf::PdfOptions::default();
+			let pdf_data = typst_pdf::pdf(&document, &pdf_options).map_err(|diags| format_diagnostics(&world, &diags))?;
+			vec![pdf_data]
+		}
+	};
 
-	let more_pages = document.pages.len() - images.len();
+	let more_pages = document.pages.len() - output_data.len();
 
 	Ok(Rendered {
-		images,
+		images: output_data,
 		more_pages,
 		warnings: format_diagnostics(&world, &warnings),
 	})
