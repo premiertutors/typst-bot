@@ -1,3 +1,4 @@
+```yaml
 name: Deploy on Tag
 
 # Runs whenever you push a Git tag (e.g. v1.2.3 or 1.2.3)
@@ -13,8 +14,6 @@ jobs:
     env:
       PACKAGE_NAMESPACE: premiertutors
       PACKAGE_NAME: 2_typst
-      # Authenticated URL for your private package (including REPO_PAT)
-      REPO_URL: https://x-access-token:${{ secrets.REPO_PAT }}@github.com/premiertutors/2_typst.git
       # Docker registry settings
       GHCR_USER: premiertutors
       IMAGE_NAME: typst-bot
@@ -32,14 +31,24 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_PAT }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Start SSH agent
+        uses: webfactory/ssh-agent@v0.5.4
+        with:
+          ssh-private-key: |
+            ${{ secrets.REPO_B_SSH_KEY }}
+            ${{ secrets.SSH_DEPLOY_KEY }}
+
+      - name: Add known hosts for GitHub
+        run: ssh-keyscan github.com >> ~/.ssh/known_hosts
 
       - name: Find latest package tag
         id: find_tag
         run: |
           echo "🔍 Finding latest package tag…"
-          # Use authenticated REPO_URL to list tags for private repo
-          LATEST=$(git ls-remote --tags "${{ env.REPO_URL }}" \
+          # Use SSH URL to list tags for private repo
+          LATEST=$(git ls-remote --tags git@github.com:premiertutors/2_typst.git \
             | awk -F/ '{ tag=$3; sub(/\^\{\}$/,"",tag); print tag }' \
             | grep -E '^[0-9]+' \
             | sort -V \
@@ -51,6 +60,11 @@ jobs:
           echo "✅ Latest package tag is: $LATEST"
           echo "LATEST_TAG=$LATEST" >> $GITHUB_ENV
 
+      - name: Clone and checkout package repo
+        run: |
+          git clone git@github.com:premiertutors/2_typst.git package-repo
+          git -C package-repo checkout ${{ env.LATEST_TAG }}
+
       - name: Build & push HTTP-server
         uses: docker/build-push-action@v4
         with:
@@ -59,34 +73,26 @@ jobs:
           push: true
           tags: ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:http-server-${{ env.IMAGE_TAG }}
 
-      - name: Start SSH agent
-        uses: webfactory/ssh-agent@v0.5.4
-        with:
-          ssh-private-key: ${{ secrets.SSH_DEPLOY_KEY }}
-
       - name: Verify droplet SSH & dependencies
         run: |
           ssh -o StrictHostKeyChecking=no \
             ${SSH_USER}@${{ secrets.DROPLET_IP }} \
             "echo SSH OK; docker --version; docker-compose --version; git --version"
 
-      - name: Deploy via GitHub API tarball
+      - name: Transfer package files to droplet
+        run: |
+          PKG_DIR=/opt/typst-bot/cache/${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}
+          ssh -o StrictHostKeyChecking=no ${SSH_USER}@${{ secrets.DROPLET_IP }} "rm -rf $PKG_DIR; mkdir -p $PKG_DIR"
+          rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" package-repo/ ${SSH_USER}@${{ secrets.DROPLET_IP }}:$PKG_DIR/
+
+      - name: Deploy on droplet
         run: |
           ssh -o StrictHostKeyChecking=no \
             ${SSH_USER}@${{ secrets.DROPLET_IP }} <<EOF
             set -euo pipefail
             cd /opt/typst-bot
 
-            PKG_DIR=cache/${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}
-            rm -rf "\$PKG_DIR"
-            mkdir -p "\$PKG_DIR"
-
-            echo "📦 Downloading tarball for $LATEST_TAG"
-            curl -sSfL \
-              -H "Authorization: token ${{ secrets.REPO_PAT }}" \
-              https://api.github.com/repos/${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}/tarball/$LATEST_TAG \
-            | tar xz --strip-components=1 -C "\$PKG_DIR"
-
             docker-compose -f docker-compose.http.yml pull
             docker-compose -f docker-compose.http.yml up -d --remove-orphans
           EOF
+```
