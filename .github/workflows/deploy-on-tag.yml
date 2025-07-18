@@ -13,11 +13,11 @@ jobs:
       GHCR_USER: premiertutors
       IMAGE_NAME: typst-bot
       IMAGE_TAG: ${{ github.ref_name }}          # the tag you just pushed
+      REPO_URL: https://x-access-token:${{ secrets.GHCR_PAT }}@github.com/premiertutors/typst-bot.git
+      SSH_USER: root
       DROPLET_IP: ${{ secrets.DROPLET_IP }}
-      SSH_USER: root                            # override with a secret if needed
       PACKAGE_NAMESPACE: ${{ secrets.PACKAGE_NAMESPACE }}
       PACKAGE_NAME: ${{ secrets.PACKAGE_NAME }}
-      PACKAGE_REPO_URL: ${{ secrets.PACKAGE_REPO_URL }}
 
     steps:
       - name: Check out code
@@ -38,29 +38,24 @@ jobs:
           push: true
           tags: ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:http-server-${{ env.IMAGE_TAG }}
 
-      - name: Start SSH agent
-        uses: webfactory/ssh-agent@v0.5.4
-        with:
-          ssh-private-key: ${{ secrets.SSH_DEPLOY_KEY }}
-
       - name: Deploy to droplet
         run: |
-            ssh -A -o StrictHostKeyChecking=no root@${{ secrets.DROPLET_IP }} <<EOF
+          ssh -o StrictHostKeyChecking=no \
+              $SSH_USER@${{ secrets.DROPLET_IP }} <<'EOF'
             set -e
             cd /opt/typst-bot
 
-            # ✅ GOOD: exactly two braces after namespace
             PKG_DIR=cache/${{ secrets.PACKAGE_NAMESPACE }}/${{ secrets.PACKAGE_NAME }}
-
-            if [ -d "\$PKG_DIR" ]; then
-                cd "\$PKG_DIR"
-                git fetch origin --tags
-                git checkout ${{ github.ref_name }}
+            if [ -d "$PKG_DIR" ]; then
+              cd "$PKG_DIR"
+              git fetch --tags
+              git checkout ${{ github.ref_name }}
             else
-                git clone --branch ${{ github.ref_name }} \
-                ${{ secrets.PACKAGE_REPO_URL }} "\$PKG_DIR"
+              git clone --branch ${{ github.ref_name }} \
+                "$REPO_URL" \
+                "$PKG_DIR"
             fi
 
             docker-compose -f docker-compose.http.yml pull
             docker-compose -f docker-compose.http.yml up -d --remove-orphans
-            EOF
+          EOF
