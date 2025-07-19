@@ -63,31 +63,6 @@ jobs:
           owner: premiertutors
           repositories: 2_typst
 
-      - name: Debug GitHub App token access
-        run: |
-          echo "🔍 Testing GitHub App token access..."
-          # Test basic API access to the repository
-          REPO_INFO=$(curl -s -H "Authorization: Bearer ${{ steps.generate_token.outputs.token }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/premiertutors/2_typst")
-          
-          echo "Repository API response:"
-          echo "$REPO_INFO" | python3 -c "import sys, json; data = json.load(sys.stdin); print(f'  Full name: {data.get(\"full_name\", \"N/A\")}'); print(f'  Private: {data.get(\"private\", \"N/A\")}'); print(f'  Clone URL: {data.get(\"clone_url\", \"N/A\")}'); print(f'  Error: {data.get(\"message\", \"None\")}')"
-          
-          # Test GitHub App installation and permissions
-          echo "🔍 Testing GitHub App installation..."
-          curl -s -H "Authorization: Bearer ${{ steps.generate_token.outputs.token }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/premiertutors/2_typst/installation" \
-            | python3 -c "import sys, json; data = json.load(sys.stdin); print(f'Installation ID: {data.get(\"id\", \"ERROR: \" + data.get(\"message\", \"Unknown\"))}')"
-          
-          # Test specific git operation via API
-          echo "🔍 Testing repository contents access..."
-          curl -s -H "Authorization: Bearer ${{ steps.generate_token.outputs.token }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/premiertutors/2_typst/contents" \
-            | python3 -c "import sys, json; data = json.load(sys.stdin); print('Contents access: SUCCESS' if isinstance(data, list) else f'Contents access: ERROR - {data.get(\"message\", \"Unknown error\")}')"
-
       - name: Determine package repository and mapping
         id: package_mapping
         run: |
@@ -145,18 +120,14 @@ jobs:
           echo "🔍 Determining package reference to deploy..."
           PACKAGE_REPO="${{ steps.package_mapping.outputs.package_repo }}"
           
-          echo "🔧 Testing repository access..."
-          
           # Try git access first (requires Contents: Read permission)
           REPO_URL_1="https://x-access-token:${{ steps.generate_token.outputs.token }}@github.com/${PACKAGE_REPO}.git"
-          echo "Testing git access..."
           if git ls-remote --heads "$REPO_URL_1" >/dev/null 2>&1; then
-            echo "✅ Git access works! Using git operations."
+            echo "✅ Using git operations"
             REPO_URL="$REPO_URL_1"
             USE_GIT=true
           else
-            echo "❌ Git access failed (likely missing Contents: Read permission)"
-            echo "🔄 Falling back to GitHub API..."
+            echo "🔄 Using GitHub API (git access unavailable)"
             USE_GIT=false
           fi
           
@@ -179,16 +150,6 @@ jobs:
             
             if [ -z "$LATEST" ]; then
               echo "❌ No valid tags found in package repository"
-              if [ "$USE_GIT" = "true" ]; then
-                echo "Available tags:"
-                git ls-remote --tags "$REPO_URL" | awk -F/ '{print "  " $3}' | head -10
-              else
-                echo "Available tags (via API):"
-                curl -s -H "Authorization: Bearer ${{ steps.generate_token.outputs.token }}" \
-                  -H "Accept: application/vnd.github.v3+json" \
-                  "https://api.github.com/repos/${PACKAGE_REPO}/tags" \
-                  | python3 -c "import sys, json; data = json.load(sys.stdin); [print(f'  {tag[\"name\"]}') for tag in (data[:10] if isinstance(data, list) else [])]"
-              fi
               exit 1
             fi
             echo "✅ Latest package tag is: $LATEST"
@@ -281,51 +242,34 @@ jobs:
 
       - name: Clone and checkout package repo
         run: |
-          echo "🔄 Cloning package repository..."
+          echo "🔄 Getting package repository..."
           PACKAGE_REPO="${{ steps.package_mapping.outputs.package_repo }}"
           USE_GIT="${{ steps.determine_ref.outputs.use_git }}"
           
           if [ "$USE_GIT" = "true" ]; then
-            echo "Using git clone..."
+            echo "Cloning via git..."
             REPO_URL="https://x-access-token:${{ steps.generate_token.outputs.token }}@github.com/${PACKAGE_REPO}.git"
             git clone "$REPO_URL" package-repo
             cd package-repo
-            
-            echo "📋 Checking out ${{ steps.determine_ref.outputs.ref_type }}: ${{ steps.determine_ref.outputs.package_ref }}"
             git checkout ${{ steps.determine_ref.outputs.package_ref }}
-            
-            # Show what we checked out
-            echo "✅ Successfully checked out:"
-            git log -1 --oneline
-            echo "Current branch/tag: $(git describe --all --exact-match HEAD 2>/dev/null || git rev-parse --short HEAD)"
+            echo "✅ Checked out ${{ steps.determine_ref.outputs.ref_type }}: ${{ steps.determine_ref.outputs.package_ref }}"
           else
-            echo "Using GitHub API to download repository archive..."
+            echo "Downloading via API..."
             PACKAGE_REF="${{ steps.determine_ref.outputs.package_ref }}"
+            mkdir -p package-repo && cd package-repo
             
-            # Create directory
-            mkdir -p package-repo
-            cd package-repo
-            
-            # Download the archive for the specific tag/branch
-            echo "📋 Downloading archive for ${{ steps.determine_ref.outputs.ref_type }}: $PACKAGE_REF"
             curl -L -H "Authorization: Bearer ${{ steps.generate_token.outputs.token }}" \
-              -H "Accept: application/vnd.github.v3+json" \
               "https://api.github.com/repos/${PACKAGE_REPO}/zipball/${PACKAGE_REF}" \
               -o archive.zip
             
-            # Extract the archive
             unzip -q archive.zip
-            
-            # Move contents from the extracted directory to current directory
             EXTRACTED_DIR=$(unzip -l archive.zip | head -4 | tail -1 | awk '{print $4}' | cut -d'/' -f1)
             mv "$EXTRACTED_DIR"/* ./ 2>/dev/null || true
             mv "$EXTRACTED_DIR"/.[!.]* ./ 2>/dev/null || true
             rmdir "$EXTRACTED_DIR" 2>/dev/null || true
             rm archive.zip
             
-            echo "✅ Successfully downloaded and extracted repository content"
-            echo "Reference: $PACKAGE_REF"
-            ls -la
+            echo "✅ Downloaded ${{ steps.determine_ref.outputs.ref_type }}: $PACKAGE_REF"
           fi
 
       - name: Build & push HTTP-server
