@@ -211,6 +211,10 @@ jobs:
             set -euo pipefail
             cd /opt/typst-bot
 
+            # Update the docker-compose file to use the correct image tag
+            sed -i 's|image: ghcr.io/premiertutors/typst-bot:http-server-.*|image: ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:http-server-${{ env.IMAGE_TAG }}|' docker-compose.http.yml
+            
+            # Pull the updated image and restart
             docker-compose -f docker-compose.http.yml pull
             docker-compose -f docker-compose.http.yml up -d --remove-orphans
           EOF
