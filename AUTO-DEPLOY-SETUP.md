@@ -24,18 +24,18 @@ Your GitHub app needs the following permissions:
 Install your GitHub app on both repositories:
 
 - `premiertutors/2_typst`
-- `premiertutors/typst-bot-pt`
+- `premiertutors/typst-bot`
 
 ### 4. Add Secrets
 
 #### In `premiertutors/2_typst` repository
 
-Add a repository secret named `DEPLOY_TRIGGER_TOKEN` with the value being either:
+Add these repository secrets:
 
-- Your GitHub App's private key (if using app authentication)
-- A Personal Access Token with `repo` scope (simpler option)
+- **`DEPLOY_APP_ID`**: Your GitHub App ID (a number like `123456`)
+- **`DEPLOY_APP_PRIVATE_KEY`**: Your GitHub App's private key (the multi-line PEM format key)
 
-#### In `premiertutors/typst-bot-pt` repository
+#### In `premiertutors/typst-bot` repository
 
 Your existing secrets should already be configured:
 
@@ -50,7 +50,7 @@ Create Release PR → Merge PR → Release Published
                                       ↓
                          Modified release.yml workflow runs
                                       ↓  
-                    Sends repository_dispatch to typst-bot-pt
+                    Sends repository_dispatch to typst-bot
                                       ↓
                             deploy.yml workflow runs
                                       ↓
@@ -62,7 +62,7 @@ Create Release PR → Merge PR → Release Published
 1. Create a release using the existing release workflow in `2_typst` repository
 2. Merge the release PR
 3. Check that the `release.yml` workflow completes and triggers deployment
-4. Check the `typst-bot-pt` repository Actions tab to see if `deploy.yml` is triggered
+4. Check the `typst-bot` repository Actions tab to see if `deploy.yml` is triggered
 5. Verify the deployment completes successfully
 
 ### 7. Manual Override
