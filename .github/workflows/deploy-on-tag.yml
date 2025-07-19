@@ -13,6 +13,11 @@ on:
       - '*.*.*'
   workflow_dispatch:
     inputs:
+      package_repo:
+        description: 'Package repository name (e.g., premiertutors/2_typst)'
+        required: false
+        default: 'premiertutors/2_typst'
+        type: string
       package_ref:
         description: 'Package repository branch/tag to deploy'
         required: false
@@ -28,8 +33,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      PACKAGE_NAMESPACE: premiertutors
-      PACKAGE_NAME: 2_typst
+      # Default package repo for automatic deployments
+      DEFAULT_PACKAGE_REPO: premiertutors/2_typst
+      # Package name mappings (repo_name:package_name)
+      PACKAGE_MAPPINGS: "2_typst:content,some-other-repo:some_other_repo"
       # Docker registry settings
       GHCR_USER: premiertutors
       IMAGE_NAME: typst-bot
@@ -42,6 +49,60 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v3
+
+      - name: Determine package repository and mapping
+        id: package_mapping
+        run: |
+          echo "🔍 Determining package repository and package name mapping..."
+          
+          # Determine which package repo to use
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # For tag pushes, use the default package repo
+            PACKAGE_REPO="${{ env.DEFAULT_PACKAGE_REPO }}"
+            echo "Tag push detected, using default package repo: $PACKAGE_REPO"
+          else
+            # For manual dispatch, use the input or default
+            PACKAGE_REPO="${{ inputs.package_repo }}"
+            if [ -z "$PACKAGE_REPO" ]; then
+              PACKAGE_REPO="${{ env.DEFAULT_PACKAGE_REPO }}"
+            fi
+            echo "Manual dispatch detected, using package repo: $PACKAGE_REPO"
+          fi
+          
+          # Extract repo name from full repo path (premiertutors/repo_name -> repo_name)
+          REPO_NAME=$(echo "$PACKAGE_REPO" | cut -d'/' -f2)
+          
+          # Always map premiertutors to pt namespace
+          PACKAGE_NAMESPACE="pt"
+          
+          # Find package name from mappings
+          PACKAGE_NAME=""
+          IFS=',' read -ra MAPPINGS <<< "${{ env.PACKAGE_MAPPINGS }}"
+          for mapping in "${MAPPINGS[@]}"; do
+            IFS=':' read -ra PAIR <<< "$mapping"
+            if [ "${PAIR[0]}" = "$REPO_NAME" ]; then
+              PACKAGE_NAME="${PAIR[1]}"
+              break
+            fi
+          done
+          
+          # Check if mapping was found
+          if [ -z "$PACKAGE_NAME" ]; then
+            echo "❌ Unknown repository: $REPO_NAME"
+            echo "Please add a mapping for this repository in PACKAGE_MAPPINGS."
+            echo "Available mappings: ${{ env.PACKAGE_MAPPINGS }}"
+            exit 1
+          fi
+          
+          echo "✅ Package mapping resolved:"
+          echo "  Repository: $PACKAGE_REPO"
+          echo "  Namespace: $PACKAGE_NAMESPACE"
+          echo "  Package Name: $PACKAGE_NAME"
+          
+          # Set outputs for use in later steps
+          echo "package_repo=$PACKAGE_REPO" >> $GITHUB_OUTPUT
+          echo "package_namespace=$PACKAGE_NAMESPACE" >> $GITHUB_OUTPUT
+          echo "package_name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
 
       - name: Log in to GHCR
         uses: docker/login-action@v2
@@ -64,11 +125,12 @@ jobs:
         id: determine_ref
         run: |
           echo "🔍 Determining package reference to deploy..."
+          PACKAGE_REPO="${{ steps.package_mapping.outputs.package_repo }}"
           
           if [ "${{ github.event_name }}" = "push" ]; then
             # For tag pushes, find the latest tag from the package repo (ORIGINAL WORKING LOGIC)
             echo "Tag push detected, finding latest package tag..."
-            LATEST=$(git ls-remote --tags git@github.com:premiertutors/2_typst.git \
+            LATEST=$(git ls-remote --tags git@github.com:$PACKAGE_REPO.git \
               | awk -F/ '{ tag=$3; sub(/\^\{\}$/,"",tag); print tag }' \
               | grep -E '^[0-9]+' \
               | sort -V \
@@ -88,7 +150,7 @@ jobs:
             if [ "$PACKAGE_REF" = "latest" ] || [ -z "$PACKAGE_REF" ]; then
               # Find latest tag (same as automatic mode)
               echo "Finding latest package tag..."
-              LATEST=$(git ls-remote --tags git@github.com:premiertutors/2_typst.git \
+              LATEST=$(git ls-remote --tags git@github.com:$PACKAGE_REPO.git \
                 | awk -F/ '{ tag=$3; sub(/\^\{\}$/,"",tag); print tag }' \
                 | grep -E '^[0-9]+' \
                 | sort -V \
@@ -102,20 +164,20 @@ jobs:
               echo "ref_type=tag" >> $GITHUB_OUTPUT
             else
               # Check if specified ref exists in package repo
-              if git ls-remote --tags git@github.com:premiertutors/2_typst.git | grep -q "refs/tags/$PACKAGE_REF$"; then
+              if git ls-remote --tags git@github.com:$PACKAGE_REPO.git | grep -q "refs/tags/$PACKAGE_REF$"; then
                 echo "✅ Found as tag in package repository: $PACKAGE_REF"
                 echo "package_ref=$PACKAGE_REF" >> $GITHUB_OUTPUT
                 echo "ref_type=tag" >> $GITHUB_OUTPUT
-              elif git ls-remote --heads git@github.com:premiertutors/2_typst.git | grep -q "refs/heads/$PACKAGE_REF$"; then
+              elif git ls-remote --heads git@github.com:$PACKAGE_REPO.git | grep -q "refs/heads/$PACKAGE_REF$"; then
                 echo "✅ Found as branch in package repository: $PACKAGE_REF"
                 echo "package_ref=$PACKAGE_REF" >> $GITHUB_OUTPUT
                 echo "ref_type=branch" >> $GITHUB_OUTPUT
               else
                 echo "❌ Reference '$PACKAGE_REF' not found in package repository"
                 echo "Available branches:"
-                git ls-remote --heads git@github.com:premiertutors/2_typst.git | awk -F/ '{print "  " $3}'
+                git ls-remote --heads git@github.com:$PACKAGE_REPO.git | awk -F/ '{print "  " $3}'
                 echo "Available tags:"
-                git ls-remote --tags git@github.com:premiertutors/2_typst.git | awk -F/ '{print "  " $3}' | head -10
+                git ls-remote --tags git@github.com:$PACKAGE_REPO.git | awk -F/ '{print "  " $3}' | head -10
                 exit 1
               fi
             fi
@@ -130,8 +192,12 @@ jobs:
             echo "Triggered by tag: ${{ github.ref_name }}"
           else
             echo "Manual dispatch from: ${{ github.ref_name }}"
+            echo "Package repository requested: ${{ inputs.package_repo }}"
             echo "Package reference requested: ${{ inputs.package_ref }}"
           fi
+          echo "Package repository: ${{ steps.package_mapping.outputs.package_repo }}"
+          echo "Package namespace: ${{ steps.package_mapping.outputs.package_namespace }}"
+          echo "Package name: ${{ steps.package_mapping.outputs.package_name }}"
           echo "Package reference to deploy: ${{ steps.determine_ref.outputs.package_ref }} (${{ steps.determine_ref.outputs.ref_type }})"
           echo "Docker image tag: ${{ env.IMAGE_TAG }}"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -139,7 +205,8 @@ jobs:
       - name: Clone and checkout package repo
         run: |
           echo "🔄 Cloning package repository..."
-          git clone git@github.com:premiertutors/2_typst.git package-repo
+          PACKAGE_REPO="${{ steps.package_mapping.outputs.package_repo }}"
+          git clone git@github.com:$PACKAGE_REPO.git package-repo
           cd package-repo
           
           echo "📋 Checking out ${{ steps.determine_ref.outputs.ref_type }}: ${{ steps.determine_ref.outputs.package_ref }}"
@@ -175,7 +242,7 @@ jobs:
 
       - name: Transfer package files to droplet
         run: |
-          PKG_DIR=/opt/typst-bot/cache/${{ env.PACKAGE_NAMESPACE }}/${{ env.PACKAGE_NAME }}
+          PKG_DIR=/opt/typst-bot/cache/${{ steps.package_mapping.outputs.package_namespace }}/${{ steps.package_mapping.outputs.package_name }}
           ssh -o StrictHostKeyChecking=no ${SSH_USER}@${{ secrets.DROPLET_IP }} "rm -rf $PKG_DIR; mkdir -p $PKG_DIR"
           rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" package-repo/ ${SSH_USER}@${{ secrets.DROPLET_IP }}:$PKG_DIR/
 
