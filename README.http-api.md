@@ -178,6 +178,14 @@ The API returns a JSON response with the following structure:
 - **PNG**: Raster format, supports resolution parameter, good for embedding in web pages
 - **PDF**: Vector format, resolution-independent, smaller file sizes, perfect for documents and printing
 
+## Adding Custom Fonts
+
+To add new fonts, simply place font files in the `fonts/` directory and restart the server. 
+
+**Supported formats:** `.ttf`, `.otf`, `.ttc`, `.otc`
+
+The server will automatically load all fonts from the directory at startup.
+
 ## Comparison with Discord Bot
 
 The Discord bot uses these defaults:
