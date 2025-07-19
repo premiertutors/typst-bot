@@ -55,10 +55,26 @@ jobs:
         run: |
           echo "🔍 Testing GitHub App token access..."
           # Test basic API access to the repository
+          REPO_INFO=$(curl -s -H "Authorization: Bearer ${{ steps.generate_token.outputs.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/premiertutors/2_typst")
+          
+          echo "Repository API response:"
+          echo "$REPO_INFO" | python3 -c "import sys, json; data = json.load(sys.stdin); print(f'  Full name: {data.get(\"full_name\", \"N/A\")}'); print(f'  Private: {data.get(\"private\", \"N/A\")}'); print(f'  Clone URL: {data.get(\"clone_url\", \"N/A\")}'); print(f'  Error: {data.get(\"message\", \"None\")}')"
+          
+          # Test GitHub App installation and permissions
+          echo "🔍 Testing GitHub App installation..."
           curl -s -H "Authorization: Bearer ${{ steps.generate_token.outputs.token }}" \
             -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/premiertutors/2_typst" \
-            | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('full_name', f'ERROR: {data.get(\"message\", \"Unknown error\")}'))"
+            "https://api.github.com/repos/premiertutors/2_typst/installation" \
+            | python3 -c "import sys, json; data = json.load(sys.stdin); print(f'Installation ID: {data.get(\"id\", \"ERROR: \" + data.get(\"message\", \"Unknown\"))}')"
+          
+          # Test specific git operation via API
+          echo "🔍 Testing repository contents access..."
+          curl -s -H "Authorization: Bearer ${{ steps.generate_token.outputs.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/premiertutors/2_typst/contents" \
+            | python3 -c "import sys, json; data = json.load(sys.stdin); print('Contents access: SUCCESS' if isinstance(data, list) else f'Contents access: ERROR - {data.get(\"message\", \"Unknown error\")}')"
 
       - name: Determine package repository and mapping
         id: package_mapping
@@ -117,24 +133,46 @@ jobs:
           echo "🔍 Determining package reference to deploy..."
           PACKAGE_REPO="${{ steps.package_mapping.outputs.package_repo }}"
           
-          # Construct the full GitHub URL with authentication
-          REPO_URL="https://x-access-token:${{ steps.generate_token.outputs.token }}@github.com/${PACKAGE_REPO}.git"
-          
           echo "🔧 Testing repository access..."
-          if ! git ls-remote --heads "$REPO_URL" >/dev/null 2>&1; then
-            echo "❌ Cannot access repository: $PACKAGE_REPO"
-            echo "This could indicate:"
-            echo "  1. The GitHub App doesn't have access to this repository"
-            echo "  2. The repository doesn't exist"
-            echo "  3. The token has insufficient permissions"
+          
+          # Try different URL formats for GitHub App authentication
+          echo "Testing git access with different URL formats..."
+          
+          # Format 1: x-access-token (current)
+          REPO_URL_1="https://x-access-token:${{ steps.generate_token.outputs.token }}@github.com/${PACKAGE_REPO}.git"
+          echo "Format 1 (x-access-token): Testing..."
+          if git ls-remote --heads "$REPO_URL_1" >/dev/null 2>&1; then
+            echo "✅ Format 1 works!"
+            REPO_URL="$REPO_URL_1"
+          else
+            echo "❌ Format 1 failed"
             
-            # Try to get more info from GitHub API
-            echo "🔍 Checking repository via API..."
-            curl -s -H "Authorization: Bearer ${{ steps.generate_token.outputs.token }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${PACKAGE_REPO}" \
-              | python3 -c "import sys, json; data = json.load(sys.stdin); print(f'API Error: {data.get(\"message\", \"Unknown error\")}' if 'message' in data else f'Repository exists: {data.get(\"full_name\", \"Unknown\")}')"
-            exit 1
+            # Format 2: Direct token as username
+            REPO_URL_2="https://${{ steps.generate_token.outputs.token }}:x-oauth-basic@github.com/${PACKAGE_REPO}.git"
+            echo "Format 2 (token as username): Testing..."
+            if git ls-remote --heads "$REPO_URL_2" >/dev/null 2>&1; then
+              echo "✅ Format 2 works!"
+              REPO_URL="$REPO_URL_2"
+            else
+              echo "❌ Format 2 failed"
+              
+              # Format 3: Token only
+              REPO_URL_3="https://${{ steps.generate_token.outputs.token }}@github.com/${PACKAGE_REPO}.git"
+              echo "Format 3 (token only): Testing..."
+              if git ls-remote --heads "$REPO_URL_3" >/dev/null 2>&1; then
+                echo "✅ Format 3 works!"
+                REPO_URL="$REPO_URL_3"
+              else
+                echo "❌ All git URL formats failed"
+                echo ""
+                echo "Detailed git error for format 1:"
+                git ls-remote --heads "$REPO_URL_1" 2>&1 || true
+                echo ""
+                echo "This suggests the GitHub App lacks 'Contents: Read' permission for git operations"
+                echo "API access works but git clone/fetch requires Contents permission"
+                exit 1
+              fi
+            fi
           fi
           echo "✅ Repository access confirmed"
           
