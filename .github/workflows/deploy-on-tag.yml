@@ -242,7 +242,13 @@ jobs:
 
       - name: Transfer package files to droplet
         run: |
-          PKG_DIR=/opt/typst-bot/cache/${{ steps.package_mapping.outputs.package_namespace }}/${{ steps.package_mapping.outputs.package_name }}
+          # Extract version from the package's typst.toml file
+          PACKAGE_VERSION=$(grep '^version = ' package-repo/typst.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "📦 Extracted package version: $PACKAGE_VERSION"
+          
+          PKG_DIR=/opt/typst-bot/cache/${{ steps.package_mapping.outputs.package_namespace }}/${{ steps.package_mapping.outputs.package_name }}/$PACKAGE_VERSION
+          echo "🎯 Target directory: $PKG_DIR"
+          
           ssh -o StrictHostKeyChecking=no ${SSH_USER}@${{ secrets.DROPLET_IP }} "rm -rf $PKG_DIR; mkdir -p $PKG_DIR"
           rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" package-repo/ ${SSH_USER}@${{ secrets.DROPLET_IP }}:$PKG_DIR/
 
