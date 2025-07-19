@@ -1,16 +1,37 @@
-name: Deploy on Tag
+name: Deploy Typst Bot
 
 permissions:
   contents: read         # read repo contents
   packages: write        # write access to GHCR
   actions: read          # read workflow metadata
 
-# Runs whenever you push a Git tag (e.g. v1.2.3 or 1.2.3)
+# Runs whenever you push a Git tag (e.g. v1.2.3 or 1.2.3) or manually
 on:
   push:
     tags:
       - 'v*.*.*'
       - '*.*.*'
+  workflow_dispatch:
+    inputs:
+      deployment_mode:
+        description: 'Deployment mode'
+        required: true
+        default: 'latest_tag'
+        type: choice
+        options:
+          - 'latest_tag'
+          - 'specific_tag'
+          - 'specific_branch'
+      package_reference:
+        description: 'Package tag/branch to deploy (only used if not "latest_tag")'
+        required: false
+        default: 'main'
+        type: string
+      image_tag_suffix:
+        description: 'Custom suffix for Docker image tag (optional)'
+        required: false
+        default: ''
+        type: string
 
 jobs:
   deploy:
@@ -21,10 +42,14 @@ jobs:
       # Docker registry settings
       GHCR_USER: premiertutors
       IMAGE_NAME: typst-bot
-      IMAGE_TAG: ${{ github.ref_name }}
+      # Set IMAGE_TAG based on trigger type
+      IMAGE_TAG: ${{ github.event_name == 'push' && github.ref_name || (inputs.image_tag_suffix != '' && format('manual-{0}', inputs.image_tag_suffix) || format('manual-{0}', github.run_number)) }}
       # SSH settings for deploy
       SSH_USER: root
       DROPLET_IP: ${{ secrets.DROPLET_IP }}
+      # Deployment configuration
+      DEPLOYMENT_MODE: ${{ github.event_name == 'push' && 'latest_tag' || inputs.deployment_mode }}
+      PACKAGE_REFERENCE: ${{ inputs.package_reference || '' }}
 
     steps:
       - name: Check out code
@@ -72,27 +97,82 @@ jobs:
       - name: Add known hosts for GitHub
         run: ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-      - name: Find latest package tag
-        id: find_tag
+      - name: Determine package reference
+        id: determine_ref
         run: |
-          echo "🔍 Finding latest package tag…"
-          # Use SSH URL to list tags for private repo
-          LATEST=$(git ls-remote --tags git@github.com:premiertutors/2_typst.git \
-            | awk -F/ '{ tag=$3; sub(/\^\{\}$/,"",tag); print tag }' \
-            | grep -E '^[0-9]+' \
-            | sort -V \
-            | tail -n1)
-          if [ -z "$LATEST" ]; then
-            echo "❌ No valid tags found"
-            exit 1
-          fi
-          echo "✅ Latest package tag is: $LATEST"
-          echo "LATEST_TAG=$LATEST" >> $GITHUB_ENV
+          echo "🔍 Determining package reference to deploy..."
+          echo "Deployment mode: ${{ env.DEPLOYMENT_MODE }}"
+          
+          case "${{ env.DEPLOYMENT_MODE }}" in
+            "latest_tag")
+              echo "Finding latest package tag..."
+              # Use SSH URL to list tags for private repo
+              LATEST=$(git ls-remote --tags git@github.com:premiertutors/2_typst.git \
+                | awk -F/ '{ tag=$3; sub(/\^\{\}$/,"",tag); print tag }' \
+                | grep -E '^[0-9]+' \
+                | sort -V \
+                | tail -n1)
+              if [ -z "$LATEST" ]; then
+                echo "❌ No valid tags found"
+                exit 1
+              fi
+              echo "✅ Latest package tag is: $LATEST"
+              echo "package_ref=$LATEST" >> $GITHUB_OUTPUT
+              echo "ref_type=tag" >> $GITHUB_OUTPUT
+              ;;
+            "specific_tag")
+              echo "Using specific tag: ${{ env.PACKAGE_REFERENCE }}"
+              # Verify the tag exists
+              if git ls-remote --tags git@github.com:premiertutors/2_typst.git | grep -q "refs/tags/${{ env.PACKAGE_REFERENCE }}$"; then
+                echo "✅ Tag ${{ env.PACKAGE_REFERENCE }} exists"
+                echo "package_ref=${{ env.PACKAGE_REFERENCE }}" >> $GITHUB_OUTPUT
+                echo "ref_type=tag" >> $GITHUB_OUTPUT
+              else
+                echo "❌ Tag ${{ env.PACKAGE_REFERENCE }} not found"
+                exit 1
+              fi
+              ;;
+            "specific_branch")
+              echo "Using specific branch: ${{ env.PACKAGE_REFERENCE }}"
+              # Verify the branch exists
+              if git ls-remote --heads git@github.com:premiertutors/2_typst.git | grep -q "refs/heads/${{ env.PACKAGE_REFERENCE }}$"; then
+                echo "✅ Branch ${{ env.PACKAGE_REFERENCE }} exists"
+                echo "package_ref=${{ env.PACKAGE_REFERENCE }}" >> $GITHUB_OUTPUT
+                echo "ref_type=branch" >> $GITHUB_OUTPUT
+              else
+                echo "❌ Branch ${{ env.PACKAGE_REFERENCE }} not found"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "❌ Unknown deployment mode: ${{ env.DEPLOYMENT_MODE }}"
+              exit 1
+              ;;
+          esac
+
+      - name: Display deployment info
+        run: |
+          echo "🚀 Deployment Information:"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Trigger: ${{ github.event_name }}"
+          echo "Deployment mode: ${{ env.DEPLOYMENT_MODE }}"
+          echo "Package reference: ${{ steps.determine_ref.outputs.package_ref }} (${{ steps.determine_ref.outputs.ref_type }})"
+          echo "Docker image tag: ${{ env.IMAGE_TAG }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
       - name: Clone and checkout package repo
         run: |
+          echo "🔄 Cloning package repository..."
           git clone git@github.com:premiertutors/2_typst.git package-repo
-          git -C package-repo checkout $LATEST_TAG
+          cd package-repo
+          
+          echo "📋 Checking out ${{ steps.determine_ref.outputs.ref_type }}: ${{ steps.determine_ref.outputs.package_ref }}"
+          git checkout ${{ steps.determine_ref.outputs.package_ref }}
+          
+          # Show what we checked out
+          echo "✅ Successfully checked out:"
+          git log -1 --oneline
+          echo "Current branch/tag: $(git describe --all --exact-match HEAD 2>/dev/null || git rev-parse --short HEAD)"
 
       - name: Build & push HTTP-server
         env:
