@@ -331,9 +331,12 @@ jobs:
             
             unzip -q archive.zip
             EXTRACTED_DIR=$(unzip -l archive.zip | head -4 | tail -1 | awk '{print $4}' | cut -d'/' -f1)
-            mv "$EXTRACTED_DIR"/* ./ 2>/dev/null || true
-            mv "$EXTRACTED_DIR"/.[!.]* ./ 2>/dev/null || true
-            rmdir "$EXTRACTED_DIR" 2>/dev/null || true
+            # Move all contents from extracted directory to current directory
+            if [ -d "$EXTRACTED_DIR" ]; then
+              mv "$EXTRACTED_DIR"/* ./ 2>/dev/null || true
+              mv "$EXTRACTED_DIR"/.[!.]* ./ 2>/dev/null || true
+              rmdir "$EXTRACTED_DIR" 2>/dev/null || true
+            fi
             rm archive.zip
             
             echo "✅ Downloaded ${{ steps.determine_ref.outputs.ref_type }}: $PACKAGE_REF"
