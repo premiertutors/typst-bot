@@ -5,3 +5,6 @@
 /.env
 *.sqlite
 *.png
+
+# macOS system files
+.DS_Store

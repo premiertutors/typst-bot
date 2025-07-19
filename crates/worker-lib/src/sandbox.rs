@@ -54,46 +54,40 @@ fn fonts() -> Vec<Font> {
 		})
 		.collect();
 
+	println!("Loaded {} fonts from typst-assets", fonts.len());
+
 	// Load custom fonts from FONTS_DIR if set
 	if let Ok(fonts_dir) = std::env::var("FONTS_DIR") {
-		eprintln!("Loading custom fonts from: {}", fonts_dir);
+		println!("Loading custom fonts from: {}", fonts_dir);
 		if let Ok(entries) = std::fs::read_dir(&fonts_dir) {
 			for entry in entries.flatten() {
 				let path = entry.path();
 				if let Some(ext) = path.extension() {
 					let ext_str = ext.to_string_lossy().to_lowercase();
 					if matches!(ext_str.as_str(), "ttf" | "otf" | "ttc" | "otc") {
-						eprintln!("Loading font file: {}", path.display());
+						println!("Loading font file: {:?}", path);
 						if let Ok(font_data) = std::fs::read(&path) {
 							let buffer = Bytes::new(font_data);
 							let face_count = ttf_parser::fonts_in_collection(&buffer).unwrap_or(1);
-							eprintln!("Font file has {} face(s)", face_count);
-							let new_fonts: Vec<Font> = (0..face_count).filter_map(|face| {
-								match Font::new(buffer.clone(), face) {
-									Some(font) => {
-										eprintln!("  Face {}: Family='{}', Weight={:?}, Style={:?}", 
-											face, 
-											font.info().family, 
-											font.info().variant.weight,
-											font.info().variant.style
-										);
-										Some(font)
-									},
-									None => {
-										eprintln!("  Face {}: Failed to load", face);
-										None
-									}
+							for face in 0..face_count {
+								if let Some(font) = Font::new(buffer.clone(), face) {
+									println!("  Loaded font face {}: Family='{}', Weight={:?}, Style={:?}", 
+										face, 
+										font.info().family, 
+										font.info().variant.weight,
+										font.info().variant.style
+									);
+									fonts.push(font);
 								}
-							}).collect();
-							fonts.extend(new_fonts);
+							}
 						}
 					}
 				}
 			}
 		}
-		eprintln!("Total fonts loaded: {}", fonts.len());
 	}
 
+	println!("Total fonts loaded: {}", fonts.len());
 	fonts
 }
 

@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.2.3] - 2025-07-19
+
+### Fixed
+
+- **Font weight and style rendering**: Fixed bold, italic, and other font weight variants not working properly
+- **Complete font support**: Added full Helvetica Neue weight variants (UltraLight, Thin, Light, Regular, Medium, Bold, Black) with italic styles
+- **Courier New italic variants**: Added missing Courier New Italic and Bold Italic font files
+- **Enhanced font loading**: Improved font loading from FONTS_DIR environment variable with better error handling
+- **Font collection support**: Added support for TrueType Collection (.ttc) files containing multiple font faces
+
+### Added
+
+- **Comprehensive font library**: Extended fonts directory with complete font families including all weight and style variants
+- **Font debugging**: Added detailed font loading information for development and troubleshooting
+
 ## [v1.2.2] - 2025-07-18
 
 ### Fixed
