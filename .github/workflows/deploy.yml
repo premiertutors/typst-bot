@@ -1,5 +1,14 @@
 name: Deploy
 
+# This workflow builds and deploys the Typst bot with multiple package repositories.
+# 
+# To add a new package repository:
+# 1. Add it to PACKAGE_MAPPINGS in the format "repo_name:package_name"
+# 2. Ensure the GitHub App has access to the repository
+# 3. The repository should contain a typst.toml file with version information
+#
+# Example: "2_typst:content,my_typst_package:my_package"
+
 permissions:
   contents: read         # read repo contents
   packages: write        # write access to GHCR
@@ -22,18 +31,101 @@ on:
         type: string
 
 jobs:
-  deploy:
+  setup:
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.parse_mappings.outputs.matrix }}
+      repositories: ${{ steps.parse_mappings.outputs.repositories }}
     env:
-      # Default package repo for automatic deployments
-      DEFAULT_PACKAGE_REPO: premiertutors/2_typst
       # Package name mappings (repo_name:package_name)
-      PACKAGE_MAPPINGS: "2_typst:content,some-other-repo:some_other_repo"
+      # Add new packages here in the format: "repo1:package1,repo2:package2"
+      PACKAGE_MAPPINGS: "2_typst:content"
+    steps:
+      - name: Parse package mappings
+        id: parse_mappings
+        run: |
+          echo "🔍 Parsing package mappings..."
+          
+          # Convert comma-separated mappings to JSON matrix
+          MAPPINGS_JSON="["
+          REPOS_LIST=""
+          IFS=',' read -ra MAPPINGS <<< "${{ env.PACKAGE_MAPPINGS }}"
+          for i in "${!MAPPINGS[@]}"; do
+            mapping="${MAPPINGS[$i]}"
+            IFS=':' read -ra PAIR <<< "$mapping"
+            repo_name="${PAIR[0]}"
+            package_name="${PAIR[1]}"
+            
+            if [ $i -gt 0 ]; then
+              MAPPINGS_JSON="$MAPPINGS_JSON,"
+              REPOS_LIST="$REPOS_LIST,"
+            fi
+            MAPPINGS_JSON="$MAPPINGS_JSON{\"repo_name\":\"$repo_name\",\"package_name\":\"$package_name\",\"repo_full\":\"premiertutors/$repo_name\"}"
+            REPOS_LIST="$REPOS_LIST$repo_name"
+          done
+          MAPPINGS_JSON="$MAPPINGS_JSON]"
+          
+          echo "Generated matrix: $MAPPINGS_JSON"
+          echo "Repositories list: $REPOS_LIST"
+          echo "matrix=$MAPPINGS_JSON" >> $GITHUB_OUTPUT
+          echo "repositories=$REPOS_LIST" >> $GITHUB_OUTPUT
+  build-image:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.image_info.outputs.image_tag }}
+    env:
       # Docker registry settings
       GHCR_USER: premiertutors
       IMAGE_NAME: typst-bot
-      # Set IMAGE_TAG based on trigger type
-      IMAGE_TAG: ${{ github.event_name == 'push' && github.ref_name || format('manual-{0}', github.run_number) }}
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Set image tag
+        id: image_info
+        run: |
+          # Set IMAGE_TAG based on trigger type
+          IMAGE_TAG="${{ github.event_name == 'push' && github.ref_name || format('manual-{0}', github.run_number) }}"
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "Image tag will be: $IMAGE_TAG"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push HTTP-server
+        env:
+          DOCKER_BUILDKIT: 1
+        run: |
+          echo "🔨 Building Docker image..."
+          IMAGE_TAG="ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:http-server-${{ steps.image_info.outputs.image_tag }}"
+          echo "Image tag: $IMAGE_TAG"
+          
+          # Build the image
+          docker build -f Dockerfile.http -t "$IMAGE_TAG" .
+          
+          # Push the image
+          echo "📤 Pushing to GHCR..."
+          docker push "$IMAGE_TAG"
+          
+          echo "✅ Successfully pushed $IMAGE_TAG"
+
+  deploy:
+    needs: [setup, build-image]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.setup.outputs.matrix) }}
+    env:
+      # Package namespace (always pt for premiertutors)
+      PACKAGE_NAMESPACE: pt
+      # Docker registry settings
+      GHCR_USER: premiertutors
+      IMAGE_NAME: typst-bot
       # SSH settings for deploy
       SSH_USER: root
       DROPLET_IP: ${{ secrets.DROPLET_IP }}
@@ -54,50 +146,25 @@ jobs:
             ${SSH_USER}@${{ secrets.DROPLET_IP }} \
             "echo 'SSH OK'; docker --version; docker-compose --version; git --version"
 
-      - name: Generate GitHub App token for 2_typst access
+      - name: Generate GitHub App token for package repo access
         id: generate_token
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ secrets.DEPLOY_APP_ID }}
           private-key: ${{ secrets.DEPLOY_APP_PRIVATE_KEY }}
           owner: premiertutors
-          repositories: 2_typst
+          repositories: ${{ needs.setup.outputs.repositories }}
 
-      - name: Determine package repository and mapping
+      - name: Set package information
         id: package_mapping
         run: |
-          echo "🔍 Determining package repository and package name mapping..."
+          echo "🔍 Setting package information from matrix..."
           
-          # Always use the default package repo (hardcoded)
-          PACKAGE_REPO="${{ env.DEFAULT_PACKAGE_REPO }}"
-          echo "Using package repo: $PACKAGE_REPO"
+          PACKAGE_REPO="${{ matrix.repo_full }}"
+          PACKAGE_NAMESPACE="${{ env.PACKAGE_NAMESPACE }}"
+          PACKAGE_NAME="${{ matrix.package_name }}"
           
-          # Extract repo name from full repo path (premiertutors/repo_name -> repo_name)
-          REPO_NAME=$(echo "$PACKAGE_REPO" | cut -d'/' -f2)
-          
-          # Always map premiertutors to pt namespace
-          PACKAGE_NAMESPACE="pt"
-          
-          # Find package name from mappings
-          PACKAGE_NAME=""
-          IFS=',' read -ra MAPPINGS <<< "${{ env.PACKAGE_MAPPINGS }}"
-          for mapping in "${MAPPINGS[@]}"; do
-            IFS=':' read -ra PAIR <<< "$mapping"
-            if [ "${PAIR[0]}" = "$REPO_NAME" ]; then
-              PACKAGE_NAME="${PAIR[1]}"
-              break
-            fi
-          done
-          
-          # Check if mapping was found
-          if [ -z "$PACKAGE_NAME" ]; then
-            echo "❌ Unknown repository: $REPO_NAME"
-            echo "Please add a mapping for this repository in PACKAGE_MAPPINGS."
-            echo "Available mappings: ${{ env.PACKAGE_MAPPINGS }}"
-            exit 1
-          fi
-          
-          echo "✅ Package mapping resolved:"
+          echo "✅ Package information:"
           echo "  Repository: $PACKAGE_REPO"
           echo "  Namespace: $PACKAGE_NAMESPACE"
           echo "  Package Name: $PACKAGE_NAME"
@@ -227,7 +294,7 @@ jobs:
           if [ "${{ github.event_name }}" = "push" ]; then
             echo "Triggered by tag: ${{ github.ref_name }}"
           elif [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            echo "Triggered by 2_typst release: ${{ github.event.client_payload.tag_name }}"
+            echo "Triggered by ${{ matrix.repo_name }} release: ${{ github.event.client_payload.tag_name }}"
             echo "Release URL: ${{ github.event.client_payload.release_url }}"
           else
             echo "Manual dispatch from: ${{ github.ref_name }}"
@@ -237,7 +304,7 @@ jobs:
           echo "Package namespace: ${{ steps.package_mapping.outputs.package_namespace }}"
           echo "Package name: ${{ steps.package_mapping.outputs.package_name }}"
           echo "Package reference to deploy: ${{ steps.determine_ref.outputs.package_ref }} (${{ steps.determine_ref.outputs.ref_type }})"
-          echo "Docker image tag: ${{ env.IMAGE_TAG }}"
+          echo "Docker image tag: ${{ needs.build-image.outputs.image_tag }}"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
       - name: Clone and checkout package repo
@@ -272,23 +339,6 @@ jobs:
             echo "✅ Downloaded ${{ steps.determine_ref.outputs.ref_type }}: $PACKAGE_REF"
           fi
 
-      - name: Build & push HTTP-server
-        env:
-          DOCKER_BUILDKIT: 1
-        run: |
-          echo "🔨 Building Docker image..."
-          IMAGE_TAG="ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:http-server-${{ env.IMAGE_TAG }}"
-          echo "Image tag: $IMAGE_TAG"
-          
-          # Build the image
-          docker build -f Dockerfile.http -t "$IMAGE_TAG" .
-          
-          # Push the image
-          echo "📤 Pushing to GHCR..."
-          docker push "$IMAGE_TAG"
-          
-          echo "✅ Successfully pushed $IMAGE_TAG"
-
       - name: Transfer package files to droplet
         run: |
           # Extract version from the package's typst.toml file
@@ -301,9 +351,23 @@ jobs:
           ssh -o StrictHostKeyChecking=no ${SSH_USER}@${{ secrets.DROPLET_IP }} "rm -rf $PKG_DIR; mkdir -p $PKG_DIR"
           rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" package-repo/ ${SSH_USER}@${{ secrets.DROPLET_IP }}:$PKG_DIR/
 
+  update-deployment:
+    needs: [build-image, deploy]
+    runs-on: ubuntu-latest
+    env:
+      GHCR_USER: premiertutors
+      IMAGE_NAME: typst-bot
+      SSH_USER: root
+      DROPLET_IP: ${{ secrets.DROPLET_IP }}
+    steps:
+      - name: Setup SSH agent for droplet access
+        uses: webfactory/ssh-agent@v0.5.4
+        with:
+          ssh-private-key: ${{ secrets.SSH_DEPLOY_KEY }}
+
       - name: Deploy on droplet
         env:
-          IMAGE_TAG_TO_DEPLOY: "ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:http-server-${{ env.IMAGE_TAG }}"
+          IMAGE_TAG_TO_DEPLOY: "ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:http-server-${{ needs.build-image.outputs.image_tag }}"
         run: |
           echo "Deploying image: $IMAGE_TAG_TO_DEPLOY"
           
