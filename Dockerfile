@@ -28,11 +28,15 @@ CMD [ "/bot/typst-bot" ]
 # These variables can get burned into the image without issue. We don't want `DISCORD_TOKEN` saved
 # in the image, though; it needs to come from the user (or from Compose) when the container is run.
 ENV DB_PATH=/bot/sqlite/db.sqlite \
-    CACHE_DIRECTORY=/bot/cache
+    CACHE_DIRECTORY=/bot/cache \
+    FONTS_DIR=/bot/fonts
 
 # Create the necessary directories and the empty database file.
-RUN mkdir -p /bot/sqlite /bot/cache && \
+RUN mkdir -p /bot/sqlite /bot/cache /bot/fonts && \
     touch /bot/sqlite/db.sqlite
+
+# Copy custom fonts
+COPY fonts/ /bot/fonts/
 
 # The only files we need from the build stage in order to run the bot are the two executables.
 COPY --from=builder \

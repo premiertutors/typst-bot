@@ -44,7 +44,7 @@ pub struct Sandbox {
 }
 
 fn fonts() -> Vec<Font> {
-	typst_assets::fonts()
+	let mut fonts: Vec<Font> = typst_assets::fonts()
 		.flat_map(|bytes| {
 			let buffer = Bytes::new(bytes);
 			let face_count = ttf_parser::fonts_in_collection(&buffer).unwrap_or(1);
@@ -52,7 +52,32 @@ fn fonts() -> Vec<Font> {
 				Font::new(buffer.clone(), face).expect("failed to load font from typst-assets")
 			})
 		})
-		.collect()
+		.collect();
+
+	// Load custom fonts from FONTS_DIR if set
+	if let Ok(fonts_dir) = std::env::var("FONTS_DIR") {
+		if let Ok(entries) = std::fs::read_dir(&fonts_dir) {
+			for entry in entries.flatten() {
+				let path = entry.path();
+				if let Some(ext) = path.extension() {
+					let ext_str = ext.to_string_lossy().to_lowercase();
+					if matches!(ext_str.as_str(), "ttf" | "otf" | "ttc" | "otc") {
+						if let Ok(font_data) = std::fs::read(&path) {
+							let buffer = Bytes::from(font_data);
+							let face_count = ttf_parser::fonts_in_collection(&buffer).unwrap_or(1);
+							for face in 0..face_count {
+								if let Ok(font) = Font::new(buffer.clone(), face) {
+									fonts.push(font);
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	fonts
 }
 
 fn make_source(source: String) -> Source {

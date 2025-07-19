@@ -10,6 +10,13 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
+# Create fonts directory and copy custom fonts
+RUN mkdir -p /usr/local/share/fonts
+COPY fonts/ /usr/local/share/fonts/
+
 COPY --from=builder /usr/src/app/target/release/http-server /usr/local/bin/
+
+ENV FONTS_DIR=/usr/local/share/fonts
+
 EXPOSE 8080
 CMD ["http-server"]
