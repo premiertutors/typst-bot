@@ -49,31 +49,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Test GHCR write access
-        run: |
-          echo "FROM scratch" > Dockerfile.test
-          docker build -f Dockerfile.test -t ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:access-test .
-          docker push ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:access-test
-          rm Dockerfile.test
-
-      - name: Verify GHCR access
-        run: |
-          echo "🔍 Verifying GHCR access..."
-          echo "Repository owner: ${{ github.repository_owner }}"
-          echo "Actor: ${{ github.actor }}"
-          echo "Repository: ${{ github.repository }}"
-          
-          # Test basic access to GHCR
-          echo "Testing GHCR connectivity..."
-          docker pull hello-world || echo "Basic Docker test completed"
-          
-          # Check if package exists
-          echo "Checking if package exists..."
-          if docker manifest inspect ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:latest 2>/dev/null; then
-            echo "✅ Package exists and is accessible"
-          else
-            echo "ℹ️ Package doesn't exist yet or no latest tag - this is normal for first push"
-          fi
 
       - name: Start SSH agent
         uses: webfactory/ssh-agent@v0.5.4
@@ -205,16 +180,18 @@ jobs:
           rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" package-repo/ ${SSH_USER}@${{ secrets.DROPLET_IP }}:$PKG_DIR/
 
       - name: Deploy on droplet
+        env:
+          IMAGE_TAG_TO_DEPLOY: "ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:http-server-${{ env.IMAGE_TAG }}"
         run: |
+          echo "Deploying image: $IMAGE_TAG_TO_DEPLOY"
+          
           ssh -o StrictHostKeyChecking=no \
-            ${SSH_USER}@${{ secrets.DROPLET_IP }} <<EOF
-            set -euo pipefail
-            cd /opt/typst-bot
-
-            # Update the docker-compose file to use the correct image tag
-            sed -i 's|image: ghcr.io/premiertutors/typst-bot:http-server-.*|image: ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:http-server-${{ env.IMAGE_TAG }}|' docker-compose.http.yml
-            
-            # Pull the updated image and restart
-            docker-compose -f docker-compose.http.yml pull
-            docker-compose -f docker-compose.http.yml up -d --remove-orphans
-          EOF
+            ${SSH_USER}@${{ secrets.DROPLET_IP }} \
+            "cd /opt/typst-bot && \
+             echo 'Stopping and removing existing containers...' && \
+             docker-compose -f docker-compose.http.yml down || true && \
+             sed -i 's|image: ghcr.io/premiertutors/typst-bot:http-server-.*|image: $IMAGE_TAG_TO_DEPLOY|' docker-compose.http.yml && \
+             echo 'Updated docker-compose.yml:' && \
+             grep 'image:' docker-compose.http.yml && \
+             docker-compose -f docker-compose.http.yml pull && \
+             docker-compose -f docker-compose.http.yml up -d --remove-orphans"
