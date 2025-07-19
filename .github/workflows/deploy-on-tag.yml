@@ -5,7 +5,7 @@ permissions:
   packages: write        # write access to GHCR
   actions: read          # read workflow metadata
 
-# Runs whenever you push a Git tag (e.g. v1.2.3 or 1.2.3) or manually
+# Runs automatically on tag push or manually with branch/tag selection via GitHub UI
 on:
   push:
     tags:
@@ -13,19 +13,10 @@ on:
       - '*.*.*'
   workflow_dispatch:
     inputs:
-      deployment_mode:
-        description: 'Deployment mode'
-        required: true
-        default: 'latest_tag'
-        type: choice
-        options:
-          - 'latest_tag'
-          - 'specific_tag'
-          - 'specific_branch'
-      package_reference:
-        description: 'Package tag/branch to deploy (only used if not "latest_tag")'
+      package_ref:
+        description: 'Package repository branch/tag to deploy'
         required: false
-        default: 'main'
+        default: 'latest'
         type: string
       image_tag_suffix:
         description: 'Custom suffix for Docker image tag (optional)'
@@ -47,9 +38,6 @@ jobs:
       # SSH settings for deploy
       SSH_USER: root
       DROPLET_IP: ${{ secrets.DROPLET_IP }}
-      # Deployment configuration
-      DEPLOYMENT_MODE: ${{ github.event_name == 'push' && 'latest_tag' || inputs.deployment_mode }}
-      PACKAGE_REFERENCE: ${{ inputs.package_reference || '' }}
 
     steps:
       - name: Check out code
@@ -101,62 +89,75 @@ jobs:
         id: determine_ref
         run: |
           echo "🔍 Determining package reference to deploy..."
-          echo "Deployment mode: ${{ env.DEPLOYMENT_MODE }}"
           
-          case "${{ env.DEPLOYMENT_MODE }}" in
-            "latest_tag")
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # For tag pushes, find the latest tag from the package repo (ORIGINAL WORKING LOGIC)
+            echo "Tag push detected, finding latest package tag..."
+            LATEST=$(git ls-remote --tags git@github.com:premiertutors/2_typst.git \
+              | awk -F/ '{ tag=$3; sub(/\^\{\}$/,"",tag); print tag }' \
+              | grep -E '^[0-9]+' \
+              | sort -V \
+              | tail -n1)
+            if [ -z "$LATEST" ]; then
+              echo "❌ No valid tags found in package repository"
+              exit 1
+            fi
+            echo "✅ Latest package tag is: $LATEST"
+            echo "package_ref=$LATEST" >> $GITHUB_OUTPUT
+            echo "ref_type=tag" >> $GITHUB_OUTPUT
+          else
+            # For manual dispatch, use the package_ref input
+            PACKAGE_REF="${{ inputs.package_ref }}"
+            echo "Manual dispatch detected, package reference: $PACKAGE_REF"
+            
+            if [ "$PACKAGE_REF" = "latest" ] || [ -z "$PACKAGE_REF" ]; then
+              # Find latest tag (same as automatic mode)
               echo "Finding latest package tag..."
-              # Use SSH URL to list tags for private repo
               LATEST=$(git ls-remote --tags git@github.com:premiertutors/2_typst.git \
                 | awk -F/ '{ tag=$3; sub(/\^\{\}$/,"",tag); print tag }' \
                 | grep -E '^[0-9]+' \
                 | sort -V \
                 | tail -n1)
               if [ -z "$LATEST" ]; then
-                echo "❌ No valid tags found"
+                echo "❌ No valid tags found in package repository"
                 exit 1
               fi
               echo "✅ Latest package tag is: $LATEST"
               echo "package_ref=$LATEST" >> $GITHUB_OUTPUT
               echo "ref_type=tag" >> $GITHUB_OUTPUT
-              ;;
-            "specific_tag")
-              echo "Using specific tag: ${{ env.PACKAGE_REFERENCE }}"
-              # Verify the tag exists
-              if git ls-remote --tags git@github.com:premiertutors/2_typst.git | grep -q "refs/tags/${{ env.PACKAGE_REFERENCE }}$"; then
-                echo "✅ Tag ${{ env.PACKAGE_REFERENCE }} exists"
-                echo "package_ref=${{ env.PACKAGE_REFERENCE }}" >> $GITHUB_OUTPUT
+            else
+              # Check if specified ref exists in package repo
+              if git ls-remote --tags git@github.com:premiertutors/2_typst.git | grep -q "refs/tags/$PACKAGE_REF$"; then
+                echo "✅ Found as tag in package repository: $PACKAGE_REF"
+                echo "package_ref=$PACKAGE_REF" >> $GITHUB_OUTPUT
                 echo "ref_type=tag" >> $GITHUB_OUTPUT
-              else
-                echo "❌ Tag ${{ env.PACKAGE_REFERENCE }} not found"
-                exit 1
-              fi
-              ;;
-            "specific_branch")
-              echo "Using specific branch: ${{ env.PACKAGE_REFERENCE }}"
-              # Verify the branch exists
-              if git ls-remote --heads git@github.com:premiertutors/2_typst.git | grep -q "refs/heads/${{ env.PACKAGE_REFERENCE }}$"; then
-                echo "✅ Branch ${{ env.PACKAGE_REFERENCE }} exists"
-                echo "package_ref=${{ env.PACKAGE_REFERENCE }}" >> $GITHUB_OUTPUT
+              elif git ls-remote --heads git@github.com:premiertutors/2_typst.git | grep -q "refs/heads/$PACKAGE_REF$"; then
+                echo "✅ Found as branch in package repository: $PACKAGE_REF"
+                echo "package_ref=$PACKAGE_REF" >> $GITHUB_OUTPUT
                 echo "ref_type=branch" >> $GITHUB_OUTPUT
               else
-                echo "❌ Branch ${{ env.PACKAGE_REFERENCE }} not found"
+                echo "❌ Reference '$PACKAGE_REF' not found in package repository"
+                echo "Available branches:"
+                git ls-remote --heads git@github.com:premiertutors/2_typst.git | awk -F/ '{print "  " $3}'
+                echo "Available tags:"
+                git ls-remote --tags git@github.com:premiertutors/2_typst.git | awk -F/ '{print "  " $3}' | head -10
                 exit 1
               fi
-              ;;
-            *)
-              echo "❌ Unknown deployment mode: ${{ env.DEPLOYMENT_MODE }}"
-              exit 1
-              ;;
-          esac
+            fi
+          fi
 
       - name: Display deployment info
         run: |
           echo "🚀 Deployment Information:"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "Trigger: ${{ github.event_name }}"
-          echo "Deployment mode: ${{ env.DEPLOYMENT_MODE }}"
-          echo "Package reference: ${{ steps.determine_ref.outputs.package_ref }} (${{ steps.determine_ref.outputs.ref_type }})"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "Triggered by tag: ${{ github.ref_name }}"
+          else
+            echo "Manual dispatch from: ${{ github.ref_name }}"
+            echo "Package reference requested: ${{ inputs.package_ref }}"
+          fi
+          echo "Package reference to deploy: ${{ steps.determine_ref.outputs.package_ref }} (${{ steps.determine_ref.outputs.ref_type }})"
           echo "Docker image tag: ${{ env.IMAGE_TAG }}"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
