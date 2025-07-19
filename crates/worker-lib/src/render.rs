@@ -6,9 +6,9 @@ use typst::layout::{Axis, PagedDocument, Size};
 use crate::diagnostic::format_diagnostics;
 use crate::sandbox::Sandbox;
 
-const DESIRED_RESOLUTION: f32 = 1000.0;
-const MAX_SIZE: f32 = 10000.0;
-const MAX_PIXELS_PER_POINT: f32 = 5.0;
+const DESIRED_RESOLUTION: f32 = 3000.0;
+const MAX_SIZE: f32 = 30000.0;
+const MAX_PIXELS_PER_POINT: f32 = 30.0;
 
 #[derive(Debug, Clone, Copy)]
 pub enum OutputFormat {
