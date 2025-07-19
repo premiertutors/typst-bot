@@ -63,13 +63,11 @@ fn fonts() -> Vec<Font> {
 					let ext_str = ext.to_string_lossy().to_lowercase();
 					if matches!(ext_str.as_str(), "ttf" | "otf" | "ttc" | "otc") {
 						if let Ok(font_data) = std::fs::read(&path) {
-							let buffer = Bytes::from(font_data);
+							let buffer = Bytes::new(font_data);
 							let face_count = ttf_parser::fonts_in_collection(&buffer).unwrap_or(1);
-							for face in 0..face_count {
-								if let Ok(font) = Font::new(buffer.clone(), face) {
-									fonts.push(font);
-								}
-							}
+							fonts.extend((0..face_count).filter_map(|face| {
+								Font::new(buffer.clone(), face)
+							}));
 						}
 					}
 				}
