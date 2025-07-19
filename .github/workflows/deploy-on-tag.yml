@@ -1,8 +1,9 @@
 name: Deploy on Tag
 
 permissions:
-  contents: read         # you only need read on repo contents
-  packages: write        # grant write access to GHCR
+  contents: read         # read repo contents
+  packages: write        # write access to GHCR
+  actions: read          # read workflow metadata
 
 # Runs whenever you push a Git tag (e.g. v1.2.3 or 1.2.3)
 on:
@@ -33,8 +34,33 @@ jobs:
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
+          username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Test GHCR write access
+        run: |
+          echo "FROM scratch" > Dockerfile.test
+          docker build -f Dockerfile.test -t ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:access-test .
+          docker push ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:access-test
+          rm Dockerfile.test
+
+      - name: Verify GHCR access
+        run: |
+          echo "🔍 Verifying GHCR access..."
+          echo "Repository owner: ${{ github.repository_owner }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "Repository: ${{ github.repository }}"
+          
+          # Test basic access to GHCR
+          echo "Testing GHCR connectivity..."
+          docker pull hello-world || echo "Basic Docker test completed"
+          
+          # Check if package exists
+          echo "Checking if package exists..."
+          if docker manifest inspect ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:latest 2>/dev/null; then
+            echo "✅ Package exists and is accessible"
+          else
+            echo "ℹ️ Package doesn't exist yet or no latest tag - this is normal for first push"
+          fi
 
       - name: Start SSH agent
         uses: webfactory/ssh-agent@v0.5.4
@@ -66,15 +92,24 @@ jobs:
       - name: Clone and checkout package repo
         run: |
           git clone git@github.com:premiertutors/2_typst.git package-repo
-          git -C package-repo checkout ${{ env.LATEST_TAG }}
+          git -C package-repo checkout $LATEST_TAG
 
       - name: Build & push HTTP-server
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          file: Dockerfile.http
-          push: true
-          tags: ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:http-server-${{ env.IMAGE_TAG }}
+        env:
+          DOCKER_BUILDKIT: 1
+        run: |
+          echo "🔨 Building Docker image..."
+          IMAGE_TAG="ghcr.io/${{ env.GHCR_USER }}/${{ env.IMAGE_NAME }}:http-server-${{ env.IMAGE_TAG }}"
+          echo "Image tag: $IMAGE_TAG"
+          
+          # Build the image
+          docker build -f Dockerfile.http -t "$IMAGE_TAG" .
+          
+          # Push the image
+          echo "📤 Pushing to GHCR..."
+          docker push "$IMAGE_TAG"
+          
+          echo "✅ Successfully pushed $IMAGE_TAG"
 
       - name: Verify droplet SSH & dependencies
         run: |
