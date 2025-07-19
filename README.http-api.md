@@ -1,21 +1,182 @@
 # HTTP API Enhanced Parameters
 
-The HTTP server now supports the same rendering parameters that the Discord bot uses, allowing you to get properly cropped images with custom backgrounds just like the Discord bot. Additionally, it supports PDF output for vector-based, lossless documents.
+The HTTP server now supports the same rendering parameters that the Discord bot uses, allowing you to get properly cr## Response Format
 
-## Getting Started
+All responses are JSON with this structure:
 
-### Running the Server Locally
+```json
+{
+  "data": ["base64-encoded-image-or-pdf-data"]
+}
+```
 
-1. **Build the HTTP server:**
-   ```bash
-   cargo build -p http-server
+The response contains a single base64-encoded string representing the rendered output. Decode it to get the actual image or PDF file.
+
+## Adding New Package Repositories
+
+The Typst bot can cache and serve multiple package repositories automatically. Here's how to add a new package repository to the system:
+
+### 1. Configure Package Mapping
+
+Edit the deployment workflow file `.github/workflows/deploy.yml` and update the `PACKAGE_MAPPINGS` environment variable:
+
+```yaml
+env:
+  # Package name mappings (repo_name:package_name)
+  # Add new packages here in the format: "repo1:package1,repo2:package2"
+  PACKAGE_MAPPINGS: "2_typst:content,my_package_repo:my_package"
+```
+
+**Format**: `"repo_name:package_alias,another_repo:another_alias"`
+
+- `repo_name`: The GitHub repository name (without `premiertutors/`)
+- `package_alias`: The friendly name used in Typst imports
+
+### 2. Prepare the Package Repository
+
+Your package repository must:
+
+1. **Have a `typst.toml` file** with version information:
+
+   ```toml
+   [package]
+   name = "my-package" 
+   version = "1.2.3"
+   entrypoint = "src/lib.typ"
+   authors = ["Your Name"]
    ```
 
-2. **Start the server:**
-   ```bash
-   ./target/debug/http-server
+2. **Use semantic version tags** (e.g., `1.2.3`, `2.0.0`) for releases
+
+3. **Have proper Typst package structure**:
+
+   ```text
+   my-package-repo/
+   ├── typst.toml
+   ├── src/
+   │   └── lib.typ      # Main entry point
+   └── README.md
    ```
-   The server will start on `http://localhost:8080`
+
+### 3. Configure GitHub App Access
+
+The deployment uses a GitHub App for authentication. Ensure the App has access to your package repository:
+
+1. **Repository Access**: Add the new repository to the GitHub App's repository access list
+2. **Permissions**: The App needs these permissions on the package repository:
+   - **Contents**: Read (to clone/download repository)
+   - **Metadata**: Read (for basic repository information)
+
+### 4. Package Repository Settings (Optional)
+
+If you want the package repository to trigger automatic deployments when new versions are released:
+
+1. **Add Repository Dispatch Action** to your package repository's `.github/workflows/` directory:
+
+   ```yaml
+   name: Trigger Bot Deployment
+   on:
+     release:
+       types: [published]
+   
+   jobs:
+     trigger-deploy:
+       runs-on: ubuntu-latest
+       steps:
+         - name: Trigger typst-bot deployment
+           uses: peter-evans/repository-dispatch@v2
+           with:
+             token: ${{ secrets.DEPLOY_TRIGGER_TOKEN }}
+             repository: premiertutors/typst-bot
+             event-type: deploy-release
+             client-payload: |
+               {
+                 "tag_name": "${{ github.event.release.tag_name }}",
+                 "release_url": "${{ github.event.release.html_url }}"
+               }
+   ```
+
+2. **Add the deployment trigger token** as a repository secret:
+
+   - Go to your package repository Settings → Secrets and variables → Actions
+   - Add a new secret named `DEPLOY_TRIGGER_TOKEN`
+   - Use the same GitHub App token that has access to the typst-bot repository
+
+### 5. Test the Integration
+
+After configuration:
+
+1. **Tag a release** in your package repository (e.g., `git tag 1.0.0 && git push --tags`)
+2. **Trigger manual deployment** via GitHub Actions if needed
+3. **Verify package is available** by checking the cache directory on the server: `/opt/typst-bot/cache/pt/your_package/version/`
+
+### 6. Using the Package in Typst
+
+Once deployed, users can import your package in Typst code:
+
+```typst
+#import "@pt/my_package:1.2.3": *
+
+// Use functions from your package
+#my-function("Hello")
+```
+
+The package will be automatically available through the bot's HTTP API and Discord integration.
+
+### Example: Adding a Math Package
+
+Let's say you want to add a repository called `typst-math-ext` with the alias `mathext`:
+
+1. **Update workflow**:
+
+   ```yaml
+   PACKAGE_MAPPINGS: "2_typst:content,typst-math-ext:mathext"
+   ```
+
+2. **Repository structure**:
+
+   ```text
+   typst-math-ext/
+   ├── typst.toml           # version = "1.0.0"
+   ├── src/
+   │   └── lib.typ          # Math functions
+   └── README.md
+   ```
+
+3. **Usage in Typst**:
+
+   ```typst
+   #import "@pt/mathext:1.0.0": advanced-integral
+   
+   $ #advanced-integral(0, infinity, "e^(-x^2)") $
+   ```
+
+## Adding Custom Fonts
+
+To add new fonts, simply place font files in the `fonts/` directory and restart the server.
+
+**Supported formats:** `.ttf`, `.otf`, `.ttc`, `.otc`
+
+The server will automatically load all fonts from the directory at startup.
+
+## Comparison with Discord Bot
+
+The Discord bot uses these defaults:
+
+- Theme: `dark`
+- Page Size: `preview`
+- Resolution: `1000.0`
+- Format: `png`
+
+To exactly match Discord output, use:
+
+```json
+{
+  "code": "your typst code here",
+  "theme": "dark",
+  "page_size": "preview"
+}
+```
 
 ### Testing Output
 
@@ -177,30 +338,3 @@ The API returns a JSON response with the following structure:
 
 - **PNG**: Raster format, supports resolution parameter, good for embedding in web pages
 - **PDF**: Vector format, resolution-independent, smaller file sizes, perfect for documents and printing
-
-## Adding Custom Fonts
-
-To add new fonts, simply place font files in the `fonts/` directory and restart the server. 
-
-**Supported formats:** `.ttf`, `.otf`, `.ttc`, `.otc`
-
-The server will automatically load all fonts from the directory at startup.
-
-## Comparison with Discord Bot
-
-The Discord bot uses these defaults:
-
-- Theme: `dark`
-- Page Size: `preview`
-- Resolution: `1000.0`
-- Format: `png`
-
-To exactly match Discord output, use:
-
-```json
-{
-  "code": "your typst code here",
-  "theme": "dark",
-  "page_size": "preview"
-}
-```
