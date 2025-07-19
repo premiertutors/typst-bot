@@ -42,6 +42,15 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
 
+      - name: Generate GitHub App token for 2_typst access
+        id: generate_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.DEPLOY_APP_ID }}
+          private-key: ${{ secrets.DEPLOY_APP_PRIVATE_KEY }}
+          owner: premiertutors
+          repositories: 2_typst
+
       - name: Determine package repository and mapping
         id: package_mapping
         run: |
@@ -93,16 +102,6 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Start SSH agent
-        uses: webfactory/ssh-agent@v0.5.4
-        with:
-          ssh-private-key: |
-            ${{ secrets.REPO_B_SSH_KEY }}
-            ${{ secrets.SSH_DEPLOY_KEY }}
-
-      - name: Add known hosts for GitHub
-        run: ssh-keyscan github.com >> ~/.ssh/known_hosts
-
       - name: Determine package reference
         id: determine_ref
         run: |
@@ -112,7 +111,7 @@ jobs:
           if [ "${{ github.event_name }}" = "push" ]; then
             # For tag pushes, find the latest tag from the package repo (ORIGINAL WORKING LOGIC)
             echo "Tag push detected, finding latest package tag..."
-            LATEST=$(git ls-remote --tags git@github.com:$PACKAGE_REPO.git \
+            LATEST=$(git ls-remote --tags https://x-access-token:${{ steps.generate_token.outputs.token }}@github.com/$PACKAGE_REPO.git \
               | awk -F/ '{ tag=$3; sub(/\^\{\}$/,"",tag); print tag }' \
               | grep -E '^[0-9]+' \
               | sort -V \
@@ -130,14 +129,14 @@ jobs:
             echo "Repository dispatch detected, release tag: $RELEASE_TAG"
             
             # Verify the tag exists in the package repo
-            if git ls-remote --tags git@github.com:$PACKAGE_REPO.git | grep -q "refs/tags/$RELEASE_TAG$"; then
+            if git ls-remote --tags https://x-access-token:${{ steps.generate_token.outputs.token }}@github.com/$PACKAGE_REPO.git | grep -q "refs/tags/$RELEASE_TAG$"; then
               echo "✅ Found release tag in package repository: $RELEASE_TAG"
               echo "package_ref=$RELEASE_TAG" >> $GITHUB_OUTPUT
               echo "ref_type=tag" >> $GITHUB_OUTPUT
             else
               echo "❌ Release tag '$RELEASE_TAG' not found in package repository"
               echo "Available tags:"
-              git ls-remote --tags git@github.com:$PACKAGE_REPO.git | awk -F/ '{print "  " $3}' | head -10
+              git ls-remote --tags https://x-access-token:${{ steps.generate_token.outputs.token }}@github.com/$PACKAGE_REPO.git | awk -F/ '{print "  " $3}' | head -10
               exit 1
             fi
           else
@@ -148,7 +147,7 @@ jobs:
             if [ "$PACKAGE_REF" = "latest" ] || [ -z "$PACKAGE_REF" ]; then
               # Find latest tag (same as automatic mode)
               echo "Finding latest package tag..."
-              LATEST=$(git ls-remote --tags git@github.com:$PACKAGE_REPO.git \
+              LATEST=$(git ls-remote --tags https://x-access-token:${{ steps.generate_token.outputs.token }}@github.com/$PACKAGE_REPO.git \
                 | awk -F/ '{ tag=$3; sub(/\^\{\}$/,"",tag); print tag }' \
                 | grep -E '^[0-9]+' \
                 | sort -V \
@@ -162,20 +161,20 @@ jobs:
               echo "ref_type=tag" >> $GITHUB_OUTPUT
             else
               # Check if specified ref exists in package repo
-              if git ls-remote --tags git@github.com:$PACKAGE_REPO.git | grep -q "refs/tags/$PACKAGE_REF$"; then
+              if git ls-remote --tags https://x-access-token:${{ steps.generate_token.outputs.token }}@github.com/$PACKAGE_REPO.git | grep -q "refs/tags/$PACKAGE_REF$"; then
                 echo "✅ Found as tag in package repository: $PACKAGE_REF"
                 echo "package_ref=$PACKAGE_REF" >> $GITHUB_OUTPUT
                 echo "ref_type=tag" >> $GITHUB_OUTPUT
-              elif git ls-remote --heads git@github.com:$PACKAGE_REPO.git | grep -q "refs/heads/$PACKAGE_REF$"; then
+              elif git ls-remote --heads https://x-access-token:${{ steps.generate_token.outputs.token }}@github.com/$PACKAGE_REPO.git | grep -q "refs/heads/$PACKAGE_REF$"; then
                 echo "✅ Found as branch in package repository: $PACKAGE_REF"
                 echo "package_ref=$PACKAGE_REF" >> $GITHUB_OUTPUT
                 echo "ref_type=branch" >> $GITHUB_OUTPUT
               else
                 echo "❌ Reference '$PACKAGE_REF' not found in package repository"
                 echo "Available branches:"
-                git ls-remote --heads git@github.com:$PACKAGE_REPO.git | awk -F/ '{print "  " $3}'
+                git ls-remote --heads https://x-access-token:${{ steps.generate_token.outputs.token }}@github.com/$PACKAGE_REPO.git | awk -F/ '{print "  " $3}'
                 echo "Available tags:"
-                git ls-remote --tags git@github.com:$PACKAGE_REPO.git | awk -F/ '{print "  " $3}' | head -10
+                git ls-remote --tags https://x-access-token:${{ steps.generate_token.outputs.token }}@github.com/$PACKAGE_REPO.git | awk -F/ '{print "  " $3}' | head -10
                 exit 1
               fi
             fi
@@ -206,7 +205,7 @@ jobs:
         run: |
           echo "🔄 Cloning package repository..."
           PACKAGE_REPO="${{ steps.package_mapping.outputs.package_repo }}"
-          git clone git@github.com:$PACKAGE_REPO.git package-repo
+          git clone https://x-access-token:${{ steps.generate_token.outputs.token }}@github.com/$PACKAGE_REPO.git package-repo
           cd package-repo
           
           echo "📋 Checking out ${{ steps.determine_ref.outputs.ref_type }}: ${{ steps.determine_ref.outputs.package_ref }}"
