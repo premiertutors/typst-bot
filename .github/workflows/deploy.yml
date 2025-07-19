@@ -42,6 +42,18 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
 
+      - name: Setup SSH agent for droplet access
+        uses: webfactory/ssh-agent@v0.5.4
+        with:
+          ssh-private-key: ${{ secrets.SSH_DEPLOY_KEY }}
+
+      - name: Verify droplet SSH & dependencies (early check)
+        run: |
+          echo "🔌 Testing SSH connection to droplet..."
+          ssh -o StrictHostKeyChecking=no \
+            ${SSH_USER}@${{ secrets.DROPLET_IP }} \
+            "echo 'SSH OK'; docker --version; docker-compose --version; git --version"
+
       - name: Generate GitHub App token for 2_typst access
         id: generate_token
         uses: actions/create-github-app-token@v1
@@ -332,12 +344,6 @@ jobs:
           docker push "$IMAGE_TAG"
           
           echo "✅ Successfully pushed $IMAGE_TAG"
-
-      - name: Verify droplet SSH & dependencies
-        run: |
-          ssh -o StrictHostKeyChecking=no \
-            ${SSH_USER}@${{ secrets.DROPLET_IP }} \
-            "echo SSH OK; docker --version; docker-compose --version; git --version"
 
       - name: Transfer package files to droplet
         run: |
