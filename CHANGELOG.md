@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.6.1] - 2025-07-19
+
+### Fixed
+
+- **Package deployment directory structure**: Fixed issue where packages downloaded via GitHub API were deployed with commit hash in directory path instead of version number
+- **Package cache organization**: Improved robustness of package extraction logic when using GitHub API fallback method
+- **Directory cleanup handling**: Added safety checks for extracted directory structure to prevent malformed package paths
+
 ## [v1.2.3] - 2025-07-19
 
 ### Fixed
