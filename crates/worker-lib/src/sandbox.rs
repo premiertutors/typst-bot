@@ -74,8 +74,8 @@ fn fonts() -> Vec<Font> {
 										eprintln!("  Face {}: Family='{}', Weight={:?}, Style={:?}", 
 											face, 
 											font.info().family, 
-											font.info().weight,
-											font.info().style
+											font.info().variant.weight,
+											font.info().variant.style
 										);
 										Some(font)
 									},

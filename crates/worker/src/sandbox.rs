@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
-
-use typst::diag::{eco_format, FileError, FileResult, PackageError, PackageResult};
+use std::sync::Mu									eprintln!("  Face {}: Family='{}', Weight={:?}, Style={:?}", 
+										face, 
+										font.info().family, 
+										font.info().variant.weight,
+										font.info().variant.style
+									);use typst::diag::{eco_format, FileError, FileResult, PackageError, PackageResult};
 use typst::foundations::{Bytes, Datetime};
 use typst::syntax::package::PackageSpec;
 use typst::syntax::{FileId, Source};
@@ -73,8 +76,8 @@ fn fonts() -> Vec<Font> {
 										eprintln!("  Face {}: Family='{}', Weight={:?}, Style={:?}", 
 											face, 
 											font.info().family, 
-											font.info().weight,
-											font.info().style
+											font.info().variant.weight,
+											font.info().variant.style
 										);
 										Some(font)
 									},
